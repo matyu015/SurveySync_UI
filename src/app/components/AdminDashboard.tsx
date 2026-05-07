@@ -3,9 +3,11 @@ import { Map, LayoutDashboard, FileText, Calendar as CalendarIcon, Users, FileCh
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line } from 'recharts';
 import { useAuth } from '../context/AuthContext';
 import { SURVEY_TYPES, BARANGAYS, mockPayments, mockRepositoryDocs, mockRequests, mockUsers } from '../data/mockData';
-import { collection, query, where, onSnapshot, updateDoc, doc, deleteDoc, getFirestore } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, updateDoc, doc, deleteDoc, addDoc, getFirestore } from 'firebase/firestore';
 import { getApp } from 'firebase/app';
 import { isMissingFirestoreDatabase } from '../../lib/firebaseErrors';
+import { addLocalDoc, deleteLocalDoc, getLocalCollection, mergeLocalDocuments, subscribeLocalCollection, updateLocalDoc } from '../../lib/localStore';
+import MonthCalendar, { formatDateKey } from './MonthCalendar';
 
 const db = getFirestore(getApp());
 
@@ -27,7 +29,9 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
   const [requests, setRequests] = useState<any[]>(mockRequests);
   const [clients, setClients] = useState<any[]>(mockUsers.filter(user => user.role === 'client'));
   const [payments, setPayments] = useState<any[]>(mockPayments);
+  const [availabilitySlots, setAvailabilitySlots] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [adminCalendarMonth, setAdminCalendarMonth] = useState(new Date());
 
   // Management Modal State
   const [selectedRequest, setSelectedRequest] = useState<any | null>(null);
@@ -36,18 +40,24 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
   // Schedule Form State
   const [scheduleDate, setScheduleDate] = useState('');
   const [scheduleTime, setScheduleTime] = useState('');
+  const [availabilityDate, setAvailabilityDate] = useState('');
+  const [availabilityStartTime, setAvailabilityStartTime] = useState('09:00');
+  const [availabilityEndTime, setAvailabilityEndTime] = useState('10:00');
+  const [availabilityStatus, setAvailabilityStatus] = useState<'available' | 'unavailable'>('available');
+  const [availabilityNote, setAvailabilityNote] = useState('');
+  const [isSavingAvailability, setIsSavingAvailability] = useState(false);
 
   // Firestore Real-time Listeners
   useEffect(() => {
     setIsLoading(true);
 
     const unsubRequests = onSnapshot(collection(db, 'requests'), (snapshot) => {
-      setRequests(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      setRequests(mergeLocalDocuments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })), getLocalCollection('requests')));
     }, (error) => {
       if (!isMissingFirestoreDatabase(error)) {
         console.error("Error loading requests:", error);
       }
-      setRequests(mockRequests);
+      setRequests(mergeLocalDocuments(mockRequests, getLocalCollection('requests')));
       setIsLoading(false);
     });
 
@@ -63,20 +73,45 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
     });
 
     const unsubPayments = onSnapshot(collection(db, 'payments'), (snapshot) => {
-      setPayments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      setPayments(mergeLocalDocuments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })), getLocalCollection('payments')));
       setIsLoading(false); 
     }, (error) => {
       if (!isMissingFirestoreDatabase(error)) {
         console.error("Error loading payments:", error);
       }
-      setPayments(mockPayments);
+      setPayments(mergeLocalDocuments(mockPayments, getLocalCollection('payments')));
       setIsLoading(false);
+    });
+
+    const unsubAvailability = onSnapshot(collection(db, 'availability'), (snapshot) => {
+      setAvailabilitySlots(mergeLocalDocuments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })), getLocalCollection('availability')));
+    }, (error) => {
+      if (!isMissingFirestoreDatabase(error)) {
+        console.error("Error loading availability:", error);
+      }
+      setAvailabilitySlots(getLocalCollection('availability'));
+    });
+
+    const unsubscribeLocalRequests = subscribeLocalCollection('requests', (localRequests) => {
+      setRequests(prev => mergeLocalDocuments(prev, localRequests));
+    });
+
+    const unsubscribeLocalPayments = subscribeLocalCollection('payments', (localPayments) => {
+      setPayments(prev => mergeLocalDocuments(prev, localPayments));
+    });
+
+    const unsubscribeLocalAvailability = subscribeLocalCollection('availability', (localSlots) => {
+      setAvailabilitySlots(prev => mergeLocalDocuments(prev, localSlots));
     });
 
     return () => {
       unsubRequests();
       unsubClients();
       unsubPayments();
+      unsubAvailability();
+      unsubscribeLocalRequests();
+      unsubscribeLocalPayments();
+      unsubscribeLocalAvailability();
     };
   }, []);
 
@@ -85,8 +120,12 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
   const handleUpdateStatus = async (requestId: string, newStatus: string) => {
     setIsUpdating(true);
     try {
-      const requestRef = doc(db, 'requests', requestId);
-      await updateDoc(requestRef, { status: newStatus });
+      if (requestId.startsWith('local-')) {
+        updateLocalDoc('requests', requestId, { status: newStatus });
+      } else {
+        const requestRef = doc(db, 'requests', requestId);
+        await updateDoc(requestRef, { status: newStatus });
+      }
       if (selectedRequest) setSelectedRequest({ ...selectedRequest, status: newStatus });
     } catch (error) {
       console.error("Error updating status:", error);
@@ -100,11 +139,25 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
     if (!scheduleDate || !scheduleTime) return;
     setIsUpdating(true);
     try {
-      const requestRef = doc(db, 'requests', selectedRequest.id);
-      await updateDoc(requestRef, { 
+      const scheduleUpdate = { 
         scheduledDate: scheduleDate,
-        scheduledTime: scheduleTime 
-      });
+        scheduledTime: scheduleTime,
+        status: 'scheduled',
+      };
+      if (selectedRequest._localOnly) {
+        updateLocalDoc('requests', selectedRequest.id, scheduleUpdate);
+      } else {
+        const requestRef = doc(db, 'requests', selectedRequest.id);
+        await updateDoc(requestRef, scheduleUpdate);
+      }
+      if (selectedRequest) {
+        setSelectedRequest({
+          ...selectedRequest,
+          scheduledDate: scheduleDate,
+          scheduledTime: scheduleTime,
+          status: 'scheduled',
+        });
+      }
       alert("Schedule updated successfully!");
       setScheduleDate('');
       setScheduleTime('');
@@ -118,7 +171,11 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
   const handleDeleteRequest = async (requestId: string) => {
     if (!window.confirm("Are you sure you want to delete this request? This cannot be undone.")) return;
     try {
-      await deleteDoc(doc(db, 'requests', requestId));
+      if (requestId.startsWith('local-')) {
+        deleteLocalDoc('requests', requestId);
+      } else {
+        await deleteDoc(doc(db, 'requests', requestId));
+      }
       setSelectedRequest(null);
     } catch (error) {
       console.error("Error deleting request:", error);
@@ -129,14 +186,93 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
     if (!window.confirm("Verify this payment as received? This will update the client's request status.")) return;
     try {
       // 1. Mark payment document as paid
-      await updateDoc(doc(db, 'payments', paymentId), { status: 'paid' });
+      if (paymentId.startsWith('local-')) {
+        updateLocalDoc('payments', paymentId, { status: 'paid', paidAt: new Date().toISOString() });
+      } else {
+        await updateDoc(doc(db, 'payments', paymentId), { status: 'paid', paidAt: new Date().toISOString() });
+      }
       // 2. Mark the parent request as paid
       if (requestId) {
-        await updateDoc(doc(db, 'requests', requestId), { paymentStatus: 'paid' });
+        if (requestId.startsWith('local-')) {
+          updateLocalDoc('requests', requestId, { paymentStatus: 'paid' });
+        } else {
+          await updateDoc(doc(db, 'requests', requestId), { paymentStatus: 'paid' });
+        }
       }
     } catch (error) {
       console.error("Error verifying payment:", error);
       alert("Failed to verify payment.");
+    }
+  };
+
+  const saveAvailabilitySlot = async (slotPayload: Record<string, any>) => {
+    try {
+      try {
+        await addDoc(collection(db, 'availability'), slotPayload);
+      } catch (firestoreError) {
+        console.error("Firestore availability save failed, saving locally:", firestoreError);
+        addLocalDoc('availability', slotPayload);
+        alert("Availability saved locally for this browser. To sync across devices, enable Firestore in Firebase.");
+      }
+    } catch (error) {
+      console.error("Error saving availability:", error);
+      alert("Failed to save calendar availability.");
+    }
+  };
+
+  const handleAddAvailability = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!availabilityDate || !availabilityStartTime || !availabilityEndTime) return;
+
+    setIsSavingAvailability(true);
+    try {
+      await saveAvailabilitySlot({
+        date: availabilityDate,
+        startTime: availabilityStartTime,
+        endTime: availabilityEndTime,
+        status: availabilityStatus,
+        note: availabilityNote,
+        createdAt: new Date().toISOString(),
+      });
+      setAvailabilityNote('');
+    } catch (error) {
+      console.error("Error saving availability:", error);
+      alert("Failed to save calendar availability.");
+    } finally {
+      setIsSavingAvailability(false);
+    }
+  };
+
+  const handleSetDateAvailability = async (dateKey: string, status: 'available' | 'unavailable') => {
+    setAvailabilityDate(dateKey);
+    setIsSavingAvailability(true);
+    try {
+      await saveAvailabilitySlot({
+        date: dateKey,
+        startTime: availabilityStartTime,
+        endTime: availabilityEndTime,
+        status,
+        note: availabilityNote || (status === 'available' ? 'Open for booking' : 'Unavailable'),
+        createdAt: new Date().toISOString(),
+      });
+      setAvailabilityStatus(status);
+      setAvailabilityNote('');
+    } finally {
+      setIsSavingAvailability(false);
+    }
+  };
+
+  const handleDeleteAvailability = async (slotId: string) => {
+    if (!window.confirm("Remove this calendar slot?")) return;
+    try {
+      if (slotId.startsWith('local-')) {
+        deleteLocalDoc('availability', slotId);
+      } else {
+        await deleteDoc(doc(db, 'availability', slotId));
+      }
+    } catch (error) {
+      console.error("Error deleting availability:", error);
+      alert("Failed to remove calendar slot.");
     }
   };
 
@@ -163,6 +299,9 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
       completed: 'bg-success/10 text-success border-success/20',
       pending: 'bg-warning/10 text-warning border-warning/20',
       paid: 'bg-success/10 text-success border-success/20',
+      available: 'bg-success/10 text-success border-success/20',
+      unavailable: 'bg-destructive/10 text-destructive border-destructive/20',
+      booked: 'bg-blue-500/10 text-blue-500 border-blue-500/20',
     };
     return colors[status] || 'bg-muted text-muted-foreground border-border';
   };
@@ -172,6 +311,41 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
     if (dateValue.toDate) return dateValue.toDate().toLocaleDateString();
     return new Date(dateValue).toLocaleDateString();
   };
+
+  const formatSlotTime = (slot: any) => {
+    if (!slot?.startTime) return 'Time TBA';
+    return slot.endTime ? `${slot.startTime} - ${slot.endTime}` : slot.startTime;
+  };
+
+  const sortedAvailability = [...availabilitySlots].sort((a, b) => {
+    const aTime = `${a.date || ''}T${a.startTime || '00:00'}`;
+    const bTime = `${b.date || ''}T${b.startTime || '00:00'}`;
+    return aTime.localeCompare(bTime);
+  });
+
+  const getAdminDayState = (dateKey: string) => {
+    const slots = availabilitySlots.filter(slot => slot.date === dateKey);
+    const scheduledCount = requests.filter(request => request.scheduledDate === dateKey).length;
+    const availableCount = slots.filter(slot => slot.status === 'available').length;
+    const unavailableCount = slots.filter(slot => slot.status === 'unavailable').length;
+    const bookedCount = slots.filter(slot => slot.status === 'booked').length;
+
+    if (bookedCount || scheduledCount) {
+      return { status: 'booked' as const, label: `${bookedCount + scheduledCount} booked` };
+    }
+    if (availableCount && unavailableCount) {
+      return { status: 'mixed' as const, label: `${availableCount} open, ${unavailableCount} blocked` };
+    }
+    if (availableCount) {
+      return { status: 'available' as const, label: `${availableCount} available` };
+    }
+    if (unavailableCount) {
+      return { status: 'unavailable' as const, label: 'Unavailable' };
+    }
+    return undefined;
+  };
+
+  const selectedAvailabilitySlots = sortedAvailability.filter(slot => slot.date === availabilityDate);
 
   // --- CHART DATA ---
   const requestsByType = SURVEY_TYPES.map(type => ({
@@ -348,45 +522,185 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
             {/* --- CALENDAR TAB (NEW) --- */}
             {activeTab === 'calendar' && (
                <div className="space-y-6">
-                 <div className="bg-gradient-to-r from-purple-500/10 to-primary/10 rounded-xl p-8 border border-purple-500/20">
-                    <h3 className="mb-2">Upcoming Field Surveys</h3>
-                    <p className="text-sm text-muted-foreground">Manage your deployed staff and scheduled surveying appointments.</p>
+                 <div className="grid xl:grid-cols-[1.4fr_0.8fr] gap-6">
+                    <MonthCalendar
+                      month={adminCalendarMonth}
+                      onMonthChange={setAdminCalendarMonth}
+                      selectedDate={availabilityDate}
+                      getDayState={getAdminDayState}
+                      onSelectDate={setAvailabilityDate}
+                    />
+
+                    <div className="bg-card rounded-xl border border-border p-6 space-y-5">
+                      <div>
+                        <h3 className="font-semibold">Set Availability</h3>
+                        <p className="text-sm text-muted-foreground mt-1">Pick a date on the month view, then mark it available or unavailable.</p>
+                      </div>
+
+                      <form onSubmit={handleAddAvailability} className="space-y-4">
+                        <div>
+                          <label className="block text-sm font-medium mb-1.5">Selected Date</label>
+                          <input
+                            type="date"
+                            value={availabilityDate}
+                            onChange={(e) => setAvailabilityDate(e.target.value)}
+                            className="w-full px-3 py-2 bg-input-background border border-border rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary"
+                            required
+                          />
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-sm font-medium mb-1.5">Start</label>
+                            <input
+                              type="time"
+                              value={availabilityStartTime}
+                              onChange={(e) => setAvailabilityStartTime(e.target.value)}
+                              className="w-full px-3 py-2 bg-input-background border border-border rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary"
+                              required
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium mb-1.5">End</label>
+                            <input
+                              type="time"
+                              value={availabilityEndTime}
+                              onChange={(e) => setAvailabilityEndTime(e.target.value)}
+                              className="w-full px-3 py-2 bg-input-background border border-border rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary"
+                              required
+                            />
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium mb-1.5">Note</label>
+                          <input
+                            type="text"
+                            value={availabilityNote}
+                            onChange={(e) => setAvailabilityNote(e.target.value)}
+                            placeholder="Optional"
+                            className="w-full px-3 py-2 bg-input-background border border-border rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary"
+                          />
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <button
+                            type="button"
+                            disabled={!availabilityDate || isSavingAvailability}
+                            onClick={() => handleSetDateAvailability(availabilityDate, 'available')}
+                            className="px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium disabled:opacity-50"
+                          >
+                            Available
+                          </button>
+                          <button
+                            type="button"
+                            disabled={!availabilityDate || isSavingAvailability}
+                            onClick={() => handleSetDateAvailability(availabilityDate, 'unavailable')}
+                            className="px-4 py-2 border border-border rounded-lg text-sm font-medium hover:bg-accent disabled:opacity-50"
+                          >
+                            Unavailable
+                          </button>
+                        </div>
+                        <button
+                          type="submit"
+                          disabled={!availabilityDate || isSavingAvailability}
+                          className="w-full px-4 py-2 bg-muted text-foreground rounded-lg text-sm font-medium disabled:opacity-50"
+                        >
+                          {isSavingAvailability ? 'Saving...' : `Add ${availabilityStatus} slot`}
+                        </button>
+                      </form>
+
+                      <div className="border-t border-border pt-4">
+                        <h4 className="text-sm font-semibold mb-3">Selected Date Slots</h4>
+                        <div className="space-y-2">
+                          {selectedAvailabilitySlots.map(slot => (
+                            <div key={slot.id} className="flex items-center justify-between gap-2 rounded-lg border border-border p-3">
+                              <div>
+                                <div className="text-sm font-medium">{formatSlotTime(slot)}</div>
+                                <div className="text-xs text-muted-foreground">{slot.note || slot.status}</div>
+                              </div>
+                              <button onClick={() => handleDeleteAvailability(slot.id)} className="text-xs text-destructive hover:underline">
+                                Remove
+                              </button>
+                            </div>
+                          ))}
+                          {selectedAvailabilitySlots.length === 0 && (
+                            <div className="text-sm text-muted-foreground">No slots on this date.</div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
                  </div>
 
-                 <div className="grid gap-4">
-                    {requests
-                      .filter(r => r.scheduledDate) // Only show requests that have a schedule
-                      .sort((a, b) => new Date(a.scheduledDate).getTime() - new Date(b.scheduledDate).getTime()) // Sort chronologically
-                      .map(request => (
-                       <div key={request.id} className="bg-card p-6 rounded-xl border border-border flex items-center justify-between hover:border-primary/50 transition-colors">
-                          <div className="flex items-center gap-6">
-                             <div className="flex flex-col items-center justify-center bg-muted/50 p-4 rounded-xl min-w-[100px]">
-                                <span className="text-xs font-bold uppercase text-primary">{new Date(request.scheduledDate).toLocaleString('default', { month: 'short' })}</span>
-                                <span className="text-3xl font-bold">{new Date(request.scheduledDate).getDate()}</span>
-                             </div>
-                             <div>
-                                <h4 className="text-lg font-bold mb-1">{request.clientName} - {request.surveyType}</h4>
-                                <div className="text-sm text-muted-foreground flex items-center gap-4">
-                                   <span className="flex items-center gap-1"><Clock className="size-4"/> {request.scheduledTime || 'TBA'}</span>
-                                   <span className="flex items-center gap-1"><Map className="size-4"/> {request.propertyDetails?.address?.barangay}, {request.propertyDetails?.address?.municipality}</span>
+                 <div className="grid xl:grid-cols-[1fr_1fr] gap-6">
+                    <div className="bg-card rounded-xl border border-border overflow-hidden">
+                      <div className="p-5 border-b border-border">
+                        <h3 className="font-semibold">Availability Calendar</h3>
+                      </div>
+                      <div className="divide-y divide-border">
+                        {sortedAvailability.map(slot => (
+                          <div key={slot.id} className="p-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="flex items-center gap-4">
+                              <div className="flex flex-col items-center justify-center bg-muted/50 p-3 rounded-xl min-w-[82px]">
+                                <span className="text-xs font-bold uppercase text-primary">{slot.date ? new Date(slot.date).toLocaleString('default', { month: 'short' }) : 'TBA'}</span>
+                                <span className="text-2xl font-bold">{slot.date ? new Date(slot.date).getDate() : '--'}</span>
+                              </div>
+                              <div>
+                                <div className="font-medium">{formatSlotTime(slot)}</div>
+                                <div className="text-sm text-muted-foreground">
+                                  {slot.status === 'booked' ? `Booked by ${slot.clientName || 'client'}` : slot.note || 'No note'}
                                 </div>
-                             </div>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className={`px-3 py-1 rounded-full text-xs border ${statusColor(slot.status)}`}>
+                                {slot.status}
+                              </span>
+                              <button
+                                onClick={() => handleDeleteAvailability(slot.id)}
+                                className="px-3 py-1.5 text-sm text-destructive hover:bg-destructive/10 rounded-lg"
+                              >
+                                Remove
+                              </button>
+                            </div>
                           </div>
-                          <div className="flex items-center gap-4">
-                             <span className={`px-3 py-1 rounded-full text-xs border ${statusColor(request.status)}`}>
-                                {request.status.replace(/_/g, ' ')}
-                             </span>
-                             <button onClick={() => setSelectedRequest(request)} className="px-4 py-2 border border-border rounded-lg hover:bg-accent text-sm">
-                                View Details
-                             </button>
-                          </div>
-                       </div>
-                    ))}
-                    {requests.filter(r => r.scheduledDate).length === 0 && (
-                       <div className="text-center p-12 bg-card rounded-xl border border-border text-muted-foreground">
-                          No upcoming surveys scheduled.
-                       </div>
-                    )}
+                        ))}
+                        {sortedAvailability.length === 0 && (
+                          <div className="text-center p-10 text-muted-foreground">No availability slots yet.</div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="bg-card rounded-xl border border-border overflow-hidden">
+                      <div className="p-5 border-b border-border">
+                        <h3 className="font-semibold">Booked Field Surveys</h3>
+                      </div>
+                      <div className="divide-y divide-border">
+                        {requests
+                          .filter(r => r.scheduledDate)
+                          .sort((a, b) => new Date(a.scheduledDate).getTime() - new Date(b.scheduledDate).getTime())
+                          .map(request => (
+                           <div key={request.id} className="p-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                              <div className="flex items-center gap-4">
+                                 <div className="flex flex-col items-center justify-center bg-muted/50 p-3 rounded-xl min-w-[82px]">
+                                    <span className="text-xs font-bold uppercase text-primary">{new Date(request.scheduledDate).toLocaleString('default', { month: 'short' })}</span>
+                                    <span className="text-2xl font-bold">{new Date(request.scheduledDate).getDate()}</span>
+                                 </div>
+                                 <div>
+                                    <h4 className="font-bold mb-1">{request.clientName} - {request.surveyType}</h4>
+                                    <div className="text-sm text-muted-foreground flex flex-wrap items-center gap-3">
+                                       <span className="flex items-center gap-1"><Clock className="size-4"/> {request.scheduledTime || 'TBA'}</span>
+                                       <span className="flex items-center gap-1"><Map className="size-4"/> {request.location || request.propertyDetails?.address?.street || 'Bataan'}</span>
+                                    </div>
+                                 </div>
+                              </div>
+                              <button onClick={() => setSelectedRequest(request)} className="px-4 py-2 border border-border rounded-lg hover:bg-accent text-sm">
+                                 View Details
+                              </button>
+                           </div>
+                        ))}
+                        {requests.filter(r => r.scheduledDate).length === 0 && (
+                           <div className="text-center p-10 text-muted-foreground">No booked surveys yet.</div>
+                        )}
+                      </div>
+                    </div>
                  </div>
                </div>
             )}

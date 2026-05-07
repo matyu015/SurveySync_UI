@@ -23,7 +23,9 @@ import { useAuth } from '../context/AuthContext';
 import { collection, query, where, onSnapshot, addDoc, updateDoc, doc } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { isMissingFirestoreDatabase } from '../../lib/firebaseErrors';
+import { addLocalDoc, getLocalCollection, mergeLocalDocuments, subscribeLocalCollection, updateLocalDoc } from '../../lib/localStore';
 import { supabase } from '../../lib/supabase';
+import MonthCalendar from './MonthCalendar';
 
 interface ClientDashboardProps {
   onLogout: () => void;
@@ -65,10 +67,13 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [clientCalendarMonth, setClientCalendarMonth] = useState(new Date());
+  const [selectedCalendarDate, setSelectedCalendarDate] = useState('');
 
   const [requests, setRequests] = useState<any[]>([]);
   const [userDocs, setUserDocs] = useState<any[]>([]);
   const [payments, setPayments] = useState<any[]>([]);
+  const [availabilitySlots, setAvailabilitySlots] = useState<any[]>([]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -81,13 +86,18 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
   const [purpose, setPurpose] = useState('');
 
   const [selectedPaymentRequest, setSelectedPaymentRequest] = useState<any | null>(null);
+  const [selectedScheduleRequestId, setSelectedScheduleRequestId] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('gcash');
   const [paymentReference, setPaymentReference] = useState('');
   const [paymentAmount, setPaymentAmount] = useState('');
   const [isPaying, setIsPaying] = useState(false);
+  const [isBookingSchedule, setIsBookingSchedule] = useState(false);
 
   useEffect(() => {
     if (!currentUser) return;
+
+    const getLocalUserRequests = () => getLocalCollection('requests').filter((request: any) => request.clientId === currentUser.uid);
+    const getLocalUserPayments = () => getLocalCollection('payments').filter((payment: any) => payment.clientId === currentUser.uid);
 
     const qRequests = query(
       collection(db, 'requests'),
@@ -96,12 +106,12 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
 
     const unsubscribeRequests = onSnapshot(qRequests, (snapshot) => {
       const reqData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setRequests(reqData);
+      setRequests(mergeLocalDocuments(reqData, getLocalUserRequests()));
     }, (error) => {
       if (!isMissingFirestoreDatabase(error)) {
         console.error("Error loading survey requests:", error);
       }
-      setRequests([]);
+      setRequests(getLocalUserRequests());
     });
 
     const qDocs = query(
@@ -126,18 +136,44 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
 
     const unsubscribePayments = onSnapshot(qPayments, (snapshot) => {
       const paymentData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setPayments(paymentData);
+      setPayments(mergeLocalDocuments(paymentData, getLocalUserPayments()));
     }, (error) => {
       if (!isMissingFirestoreDatabase(error)) {
         console.error("Error loading payments:", error);
       }
-      setPayments([]);
+      setPayments(getLocalUserPayments());
+    });
+
+    const unsubscribeAvailability = onSnapshot(collection(db, 'availability'), (snapshot) => {
+      const slotData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setAvailabilitySlots(mergeLocalDocuments(slotData, getLocalCollection('availability')));
+    }, (error) => {
+      if (!isMissingFirestoreDatabase(error)) {
+        console.error("Error loading availability:", error);
+      }
+      setAvailabilitySlots(getLocalCollection('availability'));
+    });
+
+    const unsubscribeLocalRequests = subscribeLocalCollection('requests', (localRequests) => {
+      setRequests(prev => mergeLocalDocuments(prev, localRequests.filter((request: any) => request.clientId === currentUser.uid)));
+    });
+
+    const unsubscribeLocalPayments = subscribeLocalCollection('payments', (localPayments) => {
+      setPayments(prev => mergeLocalDocuments(prev, localPayments.filter((payment: any) => payment.clientId === currentUser.uid)));
+    });
+
+    const unsubscribeLocalAvailability = subscribeLocalCollection('availability', (localSlots) => {
+      setAvailabilitySlots(prev => mergeLocalDocuments(prev, localSlots));
     });
 
     return () => {
       unsubscribeRequests();
       unsubscribeDocs();
       unsubscribePayments();
+      unsubscribeAvailability();
+      unsubscribeLocalRequests();
+      unsubscribeLocalPayments();
+      unsubscribeLocalAvailability();
     };
   }, [currentUser]);
 
@@ -197,8 +233,7 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
     try {
       const amount = SURVEY_PRICES[surveyType] || 5500;
       const referenceNo = makeReference('SS');
-
-      await addDoc(collection(db, 'requests'), {
+      const requestPayload = {
         referenceNo,
         clientId: currentUser.uid,
         clientEmail: currentUser.email,
@@ -220,13 +255,22 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
           },
           purpose: purpose || 'For survey processing',
         },
-      });
+      };
+
+      try {
+        await addDoc(collection(db, 'requests'), requestPayload);
+      } catch (firestoreError) {
+        console.error("Firestore request submit failed, saving locally:", firestoreError);
+        addLocalDoc('requests', requestPayload);
+        alert("Request saved locally for this browser. To sync across devices, enable Firestore in Firebase.");
+      }
 
       setIsRequestModalOpen(false);
       setLocation('');
       setNotes('');
       setPurpose('');
       setSurveyType('Lot Plan / Relocation');
+      setSelectedScheduleRequestId('');
       setActiveTab('requests');
     } catch (error) {
       console.error("Error submitting request: ", error);
@@ -243,6 +287,64 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
     setPaymentMethod('gcash');
   };
 
+  const openSchedulePicker = (request: any) => {
+    setSelectedScheduleRequestId(request.id);
+    setActiveTab('calendar');
+  };
+
+  const handleBookSchedule = async (slot: any) => {
+    if (!currentUser || !selectedScheduleRequestId) {
+      alert("Select a survey request before booking a schedule.");
+      return;
+    }
+
+    const selectedRequest = requests.find(request => request.id === selectedScheduleRequestId);
+    if (!selectedRequest) {
+      alert("Selected request was not found.");
+      return;
+    }
+
+    setIsBookingSchedule(true);
+    try {
+      const scheduledTime = slot.endTime ? `${slot.startTime} - ${slot.endTime}` : slot.startTime;
+      const requestScheduleUpdate = {
+        scheduledDate: slot.date,
+        scheduledTime,
+        availabilitySlotId: slot.id,
+        status: 'scheduled',
+      };
+
+      const slotBookingUpdate = {
+        status: 'booked',
+        bookedBy: currentUser.uid,
+        clientEmail: currentUser.email,
+        clientName: selectedRequest.clientName || currentUser.email,
+        requestId: selectedRequest.id,
+        requestRef: selectedRequest.referenceNo || selectedRequest.id,
+        bookedAt: new Date().toISOString(),
+      };
+
+      if (selectedRequest._localOnly) {
+        updateLocalDoc('requests', selectedRequest.id, requestScheduleUpdate);
+      } else {
+        await updateDoc(doc(db, 'requests', selectedRequest.id), requestScheduleUpdate);
+      }
+
+      if (slot._localOnly) {
+        updateLocalDoc('availability', slot.id, slotBookingUpdate);
+      } else {
+        await updateDoc(doc(db, 'availability', slot.id), slotBookingUpdate);
+      }
+
+      setSelectedScheduleRequestId('');
+    } catch (error) {
+      console.error("Schedule booking failed:", error);
+      alert("Failed to book this schedule. Please try another slot.");
+    } finally {
+      setIsBookingSchedule(false);
+    }
+  };
+
   const handleSubmitPayment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser || !selectedPaymentRequest) return;
@@ -255,7 +357,7 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
 
     setIsPaying(true);
     try {
-      await addDoc(collection(db, 'payments'), {
+      const paymentPayload = {
         requestId: selectedPaymentRequest.id,
         requestRef: selectedPaymentRequest.referenceNo || selectedPaymentRequest.id,
         clientId: currentUser.uid,
@@ -266,11 +368,22 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
         status: 'pending',
         referenceNo: paymentReference || makeReference(paymentMethod.toUpperCase()),
         createdAt: new Date().toISOString(),
-      });
+      };
 
-      await updateDoc(doc(db, 'requests', selectedPaymentRequest.id), {
-        paymentStatus: 'partial',
-      });
+      const requestPaymentUpdate = { paymentStatus: 'partial' };
+
+      try {
+        await addDoc(collection(db, 'payments'), paymentPayload);
+      } catch (firestoreError) {
+        console.error("Firestore payment submit failed, saving locally:", firestoreError);
+        addLocalDoc('payments', paymentPayload);
+      }
+
+      if (selectedPaymentRequest._localOnly) {
+        updateLocalDoc('requests', selectedPaymentRequest.id, requestPaymentUpdate);
+      } else {
+        await updateDoc(doc(db, 'requests', selectedPaymentRequest.id), requestPaymentUpdate);
+      }
 
       setSelectedPaymentRequest(null);
       setActiveTab('payments');
@@ -310,6 +423,38 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
     .filter(request => request.scheduledDate)
     .sort((a, b) => new Date(a.scheduledDate).getTime() - new Date(b.scheduledDate).getTime());
 
+  const schedulableRequests = [...requests]
+    .filter(request => !request.scheduledDate && normalizeStatus(request.status) !== 'completed')
+    .sort((a, b) => new Date(b.submittedAt || b.createdAt || 0).getTime() - new Date(a.submittedAt || a.createdAt || 0).getTime());
+
+  const availableSlots = [...availabilitySlots]
+    .filter(slot => slot.status === 'available')
+    .sort((a, b) => `${a.date || ''}T${a.startTime || '00:00'}`.localeCompare(`${b.date || ''}T${b.startTime || '00:00'}`));
+
+  const selectedDateAvailableSlots = availableSlots.filter(slot => slot.date === selectedCalendarDate);
+
+  const getClientDayState = (dateKey: string) => {
+    const scheduledCount = scheduledRequests.filter(request => request.scheduledDate === dateKey).length;
+    const slots = availabilitySlots.filter(slot => slot.date === dateKey);
+    const availableCount = slots.filter(slot => slot.status === 'available').length;
+    const unavailableCount = slots.filter(slot => slot.status === 'unavailable').length;
+    const bookedCount = slots.filter(slot => slot.status === 'booked').length;
+
+    if (scheduledCount) {
+      return { status: 'scheduled' as const, label: `${scheduledCount} scheduled` };
+    }
+    if (availableCount) {
+      return { status: 'available' as const, label: `${availableCount} open` };
+    }
+    if (unavailableCount && !bookedCount) {
+      return { status: 'unavailable' as const, label: 'Unavailable' };
+    }
+    if (bookedCount) {
+      return { status: 'booked' as const, label: 'Booked' };
+    }
+    return undefined;
+  };
+
   const pendingPayments = requests.filter(request => request.paymentStatus !== 'paid');
   const verifiedPayments = payments.filter(payment => payment.status === 'paid');
   const pendingPaymentAmount = payments
@@ -329,6 +474,11 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
   const formatCurrency = (amount: number | string | undefined) => {
     const value = Number(amount || 0);
     return `PHP ${value.toLocaleString()}`;
+  };
+
+  const formatSlotTime = (slot: any) => {
+    if (!slot?.startTime) return 'Time TBA';
+    return slot.endTime ? `${slot.startTime} - ${slot.endTime}` : slot.startTime;
   };
 
   const statusColor = (status: string) => {
@@ -544,6 +694,14 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
                       <div className="flex flex-col sm:flex-row lg:flex-col gap-2 lg:items-end">
                         <div className="text-lg font-bold">{formatCurrency(request.amount)}</div>
                         <button
+                          onClick={() => openSchedulePicker(request)}
+                          disabled={Boolean(request.scheduledDate)}
+                          className="inline-flex items-center justify-center gap-2 px-4 py-2 border border-border rounded-lg text-sm font-medium hover:bg-accent disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          <CalendarIcon className="size-4" />
+                          {request.scheduledDate ? 'Scheduled' : 'Pick Schedule'}
+                        </button>
+                        <button
                           onClick={() => openPaymentModal(request)}
                           disabled={request.paymentStatus === 'paid'}
                           className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
@@ -570,36 +728,88 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
             <div className="space-y-6">
               <div>
                 <h2 className="text-2xl font-bold tracking-tight">Schedule</h2>
-                <p className="text-sm text-muted-foreground">Admin-approved field survey schedules appear here in real time.</p>
+                <p className="text-sm text-muted-foreground">Pick from schedule slots published by admin.</p>
               </div>
 
-              <div className="grid gap-4">
-                {scheduledRequests.map(request => (
-                  <div key={request.id} className="bg-card border border-border rounded-xl p-5 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-                    <div className="flex items-center gap-4">
-                      <div className="size-16 rounded-xl bg-primary/10 flex flex-col items-center justify-center">
-                        <span className="text-xs uppercase text-primary font-bold">{new Date(request.scheduledDate).toLocaleString('en-US', { month: 'short' })}</span>
-                        <span className="text-2xl font-bold">{new Date(request.scheduledDate).getDate()}</span>
+              <div className="grid xl:grid-cols-[0.85fr_1.35fr] gap-6">
+                <div className="bg-card border border-border rounded-xl p-5 space-y-6">
+                  <h3 className="font-semibold mb-2">Choose Request</h3>
+                  <p className="text-sm text-muted-foreground mb-4">Select which survey request you want to schedule.</p>
+                  <select
+                    value={selectedScheduleRequestId}
+                    onChange={(e) => setSelectedScheduleRequestId(e.target.value)}
+                    className="w-full px-4 py-3 bg-input-background border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/50"
+                  >
+                    <option value="">Select a request</option>
+                    {schedulableRequests.map(request => (
+                      <option key={request.id} value={request.id}>
+                        {request.referenceNo || request.id} - {request.surveyType}
+                      </option>
+                    ))}
+                  </select>
+
+                  <div className="mt-6 space-y-3">
+                    <h4 className="text-sm font-semibold">Already Scheduled</h4>
+                    {scheduledRequests.slice(0, 4).map(request => (
+                      <div key={request.id} className="border border-border rounded-lg p-3">
+                        <div className="font-medium text-sm">{request.referenceNo || request.id}</div>
+                        <div className="text-xs text-muted-foreground">{formatDate(request.scheduledDate)} at {request.scheduledTime || 'Time TBA'}</div>
                       </div>
+                    ))}
+                    {scheduledRequests.length === 0 && (
+                      <div className="text-sm text-muted-foreground">No booked schedules yet.</div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <MonthCalendar
+                    month={clientCalendarMonth}
+                    onMonthChange={setClientCalendarMonth}
+                    selectedDate={selectedCalendarDate}
+                    getDayState={getClientDayState}
+                    onSelectDate={setSelectedCalendarDate}
+                  />
+
+                  <div className="bg-card border border-border rounded-xl overflow-hidden">
+                    <div className="p-5 border-b border-border flex items-center justify-between">
                       <div>
-                        <h3 className="font-semibold">{request.surveyType}</h3>
-                        <div className="text-sm text-muted-foreground flex items-center gap-2">
-                          <Clock className="size-4" />
-                          {request.scheduledTime || 'Time TBA'}
-                        </div>
-                        <div className="text-sm text-muted-foreground">{request.location || request.propertyDetails?.address?.street || 'Bataan'}</div>
+                        <h3 className="font-semibold">Selected Date</h3>
+                        <p className="text-sm text-muted-foreground">
+                          {selectedCalendarDate ? formatDate(selectedCalendarDate) : 'Pick a day on the month view.'}
+                        </p>
                       </div>
+                      <span className="text-sm text-muted-foreground">{availableSlots.length} open this month</span>
                     </div>
-                    <span className={`px-2.5 py-1 rounded-full text-xs border self-start md:self-auto ${statusColor(request.status)}`}>
-                      {normalizeStatus(request.status).replace(/_/g, ' ')}
-                    </span>
+                    <div className="divide-y divide-border">
+                      {selectedDateAvailableSlots.map(slot => (
+                        <div key={slot.id} className="p-5 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                          <div>
+                            <h4 className="font-semibold">{formatSlotTime(slot)}</h4>
+                            <div className="text-sm text-muted-foreground">{slot.note || 'Available for field survey'}</div>
+                          </div>
+                          <button
+                            onClick={() => handleBookSchedule(slot)}
+                            disabled={!selectedScheduleRequestId || isBookingSchedule}
+                            className="px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            {isBookingSchedule ? 'Booking...' : 'Book This Date'}
+                          </button>
+                        </div>
+                      ))}
+                      {selectedCalendarDate && selectedDateAvailableSlots.length === 0 && (
+                        <div className="p-8 text-center text-muted-foreground">
+                          No available slot on this date.
+                        </div>
+                      )}
+                      {!selectedCalendarDate && (
+                        <div className="p-8 text-center text-muted-foreground">
+                          Select an available date to see booking options.
+                        </div>
+                      )}
+                    </div>
                   </div>
-                ))}
-                {scheduledRequests.length === 0 && (
-                  <div className="p-12 text-center text-muted-foreground bg-card border border-border rounded-xl">
-                    No field survey has been scheduled yet.
-                  </div>
-                )}
+                </div>
               </div>
             </div>
           )}

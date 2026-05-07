@@ -18,7 +18,7 @@ interface AdminDashboardProps {
 type Tab = 'dashboard' | 'requests' | 'calendar' | 'clients' | 'documents' | 'payments' | 'repository' | 'reports' | 'staff' | 'settings';
 
 export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: AdminDashboardProps) {
-  const { currentUser } = useAuth();
+  const { logout } = useAuth();
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -36,8 +36,6 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
   // Schedule Form State
   const [scheduleDate, setScheduleDate] = useState('');
   const [scheduleTime, setScheduleTime] = useState('');
-
-  const isAdmin = (currentUser as any)?.role === 'admin';
 
   // Firestore Real-time Listeners
   useEffect(() => {
@@ -142,6 +140,16 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
     }
   };
 
+  const handleLogout = async () => {
+    try {
+      await logout();
+      onLogout();
+    } catch (error) {
+      console.error("Failed to log out:", error);
+      alert("Failed to log out. Please try again.");
+    }
+  };
+
   // --- HELPERS ---
 
   const statusColor = (status: string) => {
@@ -224,7 +232,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
           </nav>
 
           <div className="p-4 border-t border-sidebar-border flex items-center gap-2">
-            <button onClick={onLogout} className="p-2 rounded-lg text-destructive hover:bg-destructive/10 w-full flex items-center gap-2">
+            <button onClick={handleLogout} className="p-2 rounded-lg text-destructive hover:bg-destructive/10 w-full flex items-center gap-2">
               <LogOut className="size-5" /> {!sidebarCollapsed && <span>Logout</span>}
             </button>
           </div>

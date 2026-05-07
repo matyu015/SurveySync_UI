@@ -428,7 +428,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                         return (
                           <tr key={payment.id} className="hover:bg-accent/50">
                             <td className="px-6 py-4 text-sm">{payment.referenceNo}</td>
-                            <td className="px-6 py-4 text-sm text-muted-foreground">{payment.requestId || 'N/A'}</td>
+                            <td className="px-6 py-4 text-sm text-muted-foreground">{payment.requestRef || payment.requestId || 'N/A'}</td>
                             <td className="px-6 py-4 text-sm font-medium">₱{payment.amount.toLocaleString()}</td>
                             <td className="px-6 py-4 text-sm uppercase">{payment.method}</td>
                             <td className="px-6 py-4 text-sm">{formatDate(payment.createdAt)}</td>

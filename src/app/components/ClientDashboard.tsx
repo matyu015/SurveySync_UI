@@ -1,11 +1,26 @@
 import { useState, useEffect, useRef } from 'react';
-import { 
-  LayoutDashboard, FileText, Calendar as CalendarIcon, 
-  Settings, LogOut, Search, Menu, Bell, Sun, Moon, 
-  Plus, Upload, Loader2, Map, X // Added X for the modal close button
+import {
+  LayoutDashboard,
+  FileText,
+  Calendar as CalendarIcon,
+  LogOut,
+  Search,
+  Menu,
+  Sun,
+  Moon,
+  Plus,
+  Upload,
+  Loader2,
+  Map,
+  X,
+  CreditCard,
+  Clock,
+  CheckCircle2,
+  Receipt,
+  Wallet,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { collection, query, where, onSnapshot, addDoc } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, addDoc, updateDoc, doc } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { isMissingFirestoreDatabase } from '../../lib/firebaseErrors';
 import { supabase } from '../../lib/supabase';
@@ -16,41 +31,69 @@ interface ClientDashboardProps {
   toggleDarkMode: () => void;
 }
 
-type Tab = 'dashboard' | 'requests' | 'vault' | 'settings';
+type Tab = 'dashboard' | 'requests' | 'calendar' | 'payments' | 'vault';
+type PaymentMethod = 'gcash' | 'bank' | 'otc' | 'cash';
+
+const SURVEY_PRICES: Record<string, number> = {
+  'Lot Plan / Relocation': 5500,
+  'Topographic Survey': 15000,
+  'Subdivision Survey': 28000,
+  'Consolidation Survey': 18000,
+};
+
+const PAYMENT_METHODS: Array<{ value: PaymentMethod; label: string; detail: string }> = [
+  { value: 'gcash', label: 'GCash', detail: 'Mobile wallet transfer' },
+  { value: 'bank', label: 'Bank Transfer', detail: 'Online or branch deposit' },
+  { value: 'otc', label: 'Over the Counter', detail: 'Partner payment center' },
+  { value: 'cash', label: 'Cash', detail: 'Pay at the office' },
+];
+
+function makeReference(prefix: string) {
+  const timestamp = new Date();
+  const date = timestamp.toISOString().slice(0, 10).replace(/-/g, '');
+  const suffix = Math.floor(1000 + Math.random() * 9000);
+  return `${prefix}-${date}-${suffix}`;
+}
+
+function normalizeStatus(status?: string) {
+  return (status || 'submitted').toLowerCase().replace(/\s+/g, '_');
+}
 
 export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: ClientDashboardProps) {
   const { currentUser, logout } = useAuth();
-  
-  // UI State
+
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  
-  // Data State
+
   const [requests, setRequests] = useState<any[]>([]);
   const [userDocs, setUserDocs] = useState<any[]>([]);
-  
-  // Upload State
+  const [payments, setPayments] = useState<any[]>([]);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isUploading, setIsUploading] = useState(false);
 
-  // --- NEW: Modal State ---
-  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isRequestModalOpen, setIsRequestModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [surveyType, setSurveyType] = useState('Lot Plan / Relocation');
   const [location, setLocation] = useState('');
   const [notes, setNotes] = useState('');
+  const [purpose, setPurpose] = useState('');
 
-  // 1. Fetch Real-time Data from Firebase Firestore
+  const [selectedPaymentRequest, setSelectedPaymentRequest] = useState<any | null>(null);
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('gcash');
+  const [paymentReference, setPaymentReference] = useState('');
+  const [paymentAmount, setPaymentAmount] = useState('');
+  const [isPaying, setIsPaying] = useState(false);
+
   useEffect(() => {
     if (!currentUser) return;
 
-    // Fetch Survey Requests
     const qRequests = query(
-      collection(db, 'requests'), 
+      collection(db, 'requests'),
       where('clientId', '==', currentUser.uid)
     );
-    
+
     const unsubscribeRequests = onSnapshot(qRequests, (snapshot) => {
       const reqData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setRequests(reqData);
@@ -61,7 +104,6 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
       setRequests([]);
     });
 
-    // Fetch Documents from Vault
     const qDocs = query(
       collection(db, 'documents'),
       where('clientId', '==', currentUser.uid)
@@ -77,13 +119,28 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
       setUserDocs([]);
     });
 
+    const qPayments = query(
+      collection(db, 'payments'),
+      where('clientId', '==', currentUser.uid)
+    );
+
+    const unsubscribePayments = onSnapshot(qPayments, (snapshot) => {
+      const paymentData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setPayments(paymentData);
+    }, (error) => {
+      if (!isMissingFirestoreDatabase(error)) {
+        console.error("Error loading payments:", error);
+      }
+      setPayments([]);
+    });
+
     return () => {
       unsubscribeRequests();
       unsubscribeDocs();
+      unsubscribePayments();
     };
   }, [currentUser]);
 
-  // 2. Supabase File Upload Logic
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file || !currentUser) return;
@@ -97,21 +154,19 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
     try {
       const fileName = `${currentUser.uid}/${Date.now()}_${file.name}`;
 
-      // Upload to Supabase Storage
-      const { data: uploadData, error: uploadError } = await supabase.storage
+      const { error: uploadError } = await supabase.storage
         .from('documents')
         .upload(fileName, file);
 
       if (uploadError) throw uploadError;
 
-      // Get the public download URL from Supabase
       const { data: publicUrlData } = supabase.storage
         .from('documents')
         .getPublicUrl(fileName);
 
-      // Save document metadata to Firebase Firestore
       await addDoc(collection(db, 'documents'), {
         clientId: currentUser.uid,
+        clientEmail: currentUser.email,
         name: file.name,
         fileUrl: publicUrlData.publicUrl,
         status: 'under_review',
@@ -130,36 +185,100 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
     }
   };
 
-  // --- NEW: Handle Survey Request Submission ---
   const handleSubmitRequest = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser) {
       alert("Please log in to submit a request.");
       return;
     }
-    
+
     setIsSubmitting(true);
 
     try {
+      const amount = SURVEY_PRICES[surveyType] || 5500;
+      const referenceNo = makeReference('SS');
+
       await addDoc(collection(db, 'requests'), {
+        referenceNo,
         clientId: currentUser.uid,
         clientEmail: currentUser.email,
+        clientName: currentUser.displayName || currentUser.email?.split('@')[0] || 'Client',
         surveyType,
         location,
         notes,
-        status: 'Pending',
-        createdAt: new Date().toISOString()
+        status: 'submitted',
+        paymentStatus: 'pending',
+        amount,
+        submittedAt: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
+        propertyDetails: {
+          address: {
+            street: location,
+            barangay: '',
+            municipality: '',
+            province: 'Bataan',
+          },
+          purpose: purpose || 'For survey processing',
+        },
       });
 
-      setIsModalOpen(false);
+      setIsRequestModalOpen(false);
       setLocation('');
       setNotes('');
+      setPurpose('');
       setSurveyType('Lot Plan / Relocation');
+      setActiveTab('requests');
     } catch (error) {
       console.error("Error submitting request: ", error);
-      alert("Failed to submit request. Ensure ad-blockers are disabled for localhost.");
+      alert("Failed to submit request. Please check Firebase/Firestore configuration.");
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const openPaymentModal = (request: any) => {
+    setSelectedPaymentRequest(request);
+    setPaymentAmount(String(request.amount || SURVEY_PRICES[request.surveyType] || 0));
+    setPaymentReference('');
+    setPaymentMethod('gcash');
+  };
+
+  const handleSubmitPayment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentUser || !selectedPaymentRequest) return;
+
+    const numericAmount = Number(paymentAmount);
+    if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+      alert("Enter a valid payment amount.");
+      return;
+    }
+
+    setIsPaying(true);
+    try {
+      await addDoc(collection(db, 'payments'), {
+        requestId: selectedPaymentRequest.id,
+        requestRef: selectedPaymentRequest.referenceNo || selectedPaymentRequest.id,
+        clientId: currentUser.uid,
+        clientEmail: currentUser.email,
+        clientName: selectedPaymentRequest.clientName || currentUser.email,
+        amount: numericAmount,
+        method: paymentMethod,
+        status: 'pending',
+        referenceNo: paymentReference || makeReference(paymentMethod.toUpperCase()),
+        createdAt: new Date().toISOString(),
+      });
+
+      await updateDoc(doc(db, 'requests', selectedPaymentRequest.id), {
+        paymentStatus: 'partial',
+      });
+
+      setSelectedPaymentRequest(null);
+      setActiveTab('payments');
+    } catch (error) {
+      console.error("Payment submission failed:", error);
+      alert("Failed to submit payment. Please check Firebase/Firestore configuration.");
+    } finally {
+      setIsPaying(false);
     }
   };
 
@@ -172,29 +291,68 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
     }
   };
 
-  // Helper Functions
-  const formatDate = (dateString: string) => {
-    if (!dateString) return 'N/A';
-    return new Date(dateString).toLocaleDateString('en-US', {
-      year: 'numeric', month: 'short', day: 'numeric'
+  const filteredRequests = requests.filter(request => {
+    const haystack = [
+      request.referenceNo,
+      request.surveyType,
+      request.location,
+      request.status,
+      request.paymentStatus,
+    ].join(' ').toLowerCase();
+    return haystack.includes(searchQuery.toLowerCase());
+  });
+
+  const sortedRequests = [...filteredRequests].sort((a, b) => {
+    return new Date(b.submittedAt || b.createdAt || 0).getTime() - new Date(a.submittedAt || a.createdAt || 0).getTime();
+  });
+
+  const scheduledRequests = [...requests]
+    .filter(request => request.scheduledDate)
+    .sort((a, b) => new Date(a.scheduledDate).getTime() - new Date(b.scheduledDate).getTime());
+
+  const pendingPayments = requests.filter(request => request.paymentStatus !== 'paid');
+  const verifiedPayments = payments.filter(payment => payment.status === 'paid');
+  const pendingPaymentAmount = payments
+    .filter(payment => payment.status === 'pending')
+    .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+
+  const formatDate = (dateValue: any) => {
+    if (!dateValue) return 'N/A';
+    if (dateValue.toDate) return dateValue.toDate().toLocaleDateString();
+    return new Date(dateValue).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric'
     });
   };
 
+  const formatCurrency = (amount: number | string | undefined) => {
+    const value = Number(amount || 0);
+    return `PHP ${value.toLocaleString()}`;
+  };
+
   const statusColor = (status: string) => {
-    switch(status?.toLowerCase()) {
-      case 'completed': return 'bg-emerald-500/10 text-emerald-500';
-      case 'in_progress': return 'bg-blue-500/10 text-blue-500';
-      case 'pending': return 'bg-amber-500/10 text-amber-500';
-      case 'under_review': return 'bg-purple-500/10 text-purple-500';
-      default: return 'bg-gray-500/10 text-gray-500';
+    switch(normalizeStatus(status)) {
+      case 'completed':
+      case 'paid':
+        return 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20';
+      case 'scheduled':
+      case 'field_survey':
+        return 'bg-blue-500/10 text-blue-600 border-blue-500/20';
+      case 'submitted':
+      case 'pending':
+        return 'bg-amber-500/10 text-amber-600 border-amber-500/20';
+      case 'under_review':
+      case 'partial':
+        return 'bg-purple-500/10 text-purple-600 border-purple-500/20';
+      default:
+        return 'bg-gray-500/10 text-gray-600 border-gray-500/20';
     }
   };
 
   return (
     <div className="min-h-screen flex bg-background text-foreground transition-colors duration-300">
-      
-      {/* Sidebar */}
-      <aside className={`${sidebarCollapsed ? 'w-20' : 'w-64'} bg-card border-r border-border transition-all duration-300 flex flex-col hidden md:flex`}>
+      <aside className={`${sidebarCollapsed ? 'w-20' : 'w-64'} bg-card border-r border-border transition-all duration-300 flex-col hidden md:flex`}>
         <div className="h-16 flex items-center justify-between px-4 border-b border-border">
           {!sidebarCollapsed && <span className="font-bold text-lg tracking-tight">SurveySync</span>}
           <button onClick={() => setSidebarCollapsed(!sidebarCollapsed)} className="p-2 rounded-lg hover:bg-accent text-muted-foreground">
@@ -206,6 +364,8 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
           {[
             { id: 'dashboard', icon: LayoutDashboard, label: 'Overview' },
             { id: 'requests', icon: Map, label: 'My Surveys' },
+            { id: 'calendar', icon: CalendarIcon, label: 'Schedule' },
+            { id: 'payments', icon: CreditCard, label: 'Payments' },
             { id: 'vault', icon: FileText, label: 'Document Vault' },
           ].map((item) => (
             <button
@@ -229,24 +389,24 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
         </div>
       </aside>
 
-      {/* Main Content */}
       <main className="flex-1 flex flex-col min-w-0">
-        
-        {/* Header */}
         <header className="h-16 bg-card/50 backdrop-blur-sm border-b border-border flex items-center justify-between px-6 sticky top-0 z-10">
           <div className="flex items-center gap-4 flex-1">
+            <button className="md:hidden p-2 rounded-lg hover:bg-accent">
+              <Menu className="size-5" />
+            </button>
             <div className="relative w-full max-w-md hidden md:block">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-              <input 
-                type="text" 
-                placeholder="Search surveys or documents..." 
+              <input
+                type="text"
+                placeholder="Search surveys, payments, or status..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="w-full pl-10 pr-4 py-2 bg-input-background border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
               />
             </div>
           </div>
-          
+
           <div className="flex items-center gap-4">
             <button onClick={toggleDarkMode} className="p-2 rounded-full hover:bg-accent text-muted-foreground transition-colors">
               {darkMode ? <Sun className="size-5" /> : <Moon className="size-5" />}
@@ -257,187 +417,265 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
           </div>
         </header>
 
-        {/* Tab Content Area */}
         <div className="p-6 overflow-auto relative">
-          
-          {/* DASHBOARD TAB */}
           {activeTab === 'dashboard' && (
             <div className="space-y-6">
-              <div>
-                <h2 className="text-2xl font-bold tracking-tight mb-1">Welcome back!</h2>
-                <p className="text-muted-foreground text-sm">Here is an overview of your active projects.</p>
-              </div>
-
-              <div className="grid md:grid-cols-3 gap-4">
-                <div className="bg-card p-6 rounded-2xl border border-border shadow-sm flex items-center gap-4">
-                  <div className="size-12 rounded-xl bg-blue-500/10 flex items-center justify-center">
-                    <Map className="size-6 text-blue-500" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-muted-foreground">Total Requests</p>
-                    <h3 className="text-2xl font-bold">{requests.length}</h3>
-                  </div>
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <h2 className="text-2xl font-bold tracking-tight mb-1">Client workspace</h2>
+                  <p className="text-muted-foreground text-sm">Track survey progress, payment verification, and field schedules.</p>
                 </div>
-                <div className="bg-card p-6 rounded-2xl border border-border shadow-sm flex items-center gap-4">
-                  <div className="size-12 rounded-xl bg-emerald-500/10 flex items-center justify-center">
-                    <CalendarIcon className="size-6 text-emerald-500" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-muted-foreground">Completed</p>
-                    <h3 className="text-2xl font-bold">
-                      {requests.filter(r => r.status?.toLowerCase() === 'completed').length}
-                    </h3>
-                  </div>
-                </div>
-                <div className="bg-card p-6 rounded-2xl border border-border shadow-sm flex items-center gap-4">
-                  <div className="size-12 rounded-xl bg-purple-500/10 flex items-center justify-center">
-                    <FileText className="size-6 text-purple-500" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-muted-foreground">Documents</p>
-                    <h3 className="text-2xl font-bold">{userDocs.length}</h3>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* REQUESTS TAB */}
-          {activeTab === 'requests' && (
-            <div className="space-y-6">
-              <div className="flex items-center justify-between">
-                <h2 className="text-2xl font-bold tracking-tight">My Surveys</h2>
-                {/* --- NEW: Button triggers Modal --- */}
-                <button 
-                  onClick={() => setIsModalOpen(true)}
-                  className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-lg text-sm font-medium hover:opacity-90 transition-opacity"
+                <button
+                  onClick={() => setIsRequestModalOpen(true)}
+                  className="flex items-center justify-center gap-2 bg-primary text-primary-foreground px-4 py-2.5 rounded-lg text-sm font-medium hover:opacity-90 transition-opacity"
                 >
                   <Plus className="size-4" /> New Request
                 </button>
               </div>
 
-              <div className="bg-card border border-border rounded-xl overflow-hidden shadow-sm">
-                {requests.length === 0 ? (
-                  <div className="p-12 flex flex-col items-center justify-center text-center text-muted-foreground">
+              <div className="grid md:grid-cols-4 gap-4">
+                {[
+                  { label: 'Survey Requests', value: requests.length, icon: Map, color: 'text-blue-500', bg: 'bg-blue-500/10' },
+                  { label: 'Scheduled Visits', value: scheduledRequests.length, icon: CalendarIcon, color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
+                  { label: 'Pending Payments', value: formatCurrency(pendingPaymentAmount), icon: Wallet, color: 'text-amber-500', bg: 'bg-amber-500/10' },
+                  { label: 'Verified Payments', value: verifiedPayments.length, icon: CheckCircle2, color: 'text-purple-500', bg: 'bg-purple-500/10' },
+                ].map(stat => (
+                  <div key={stat.label} className="bg-card p-5 rounded-xl border border-border shadow-sm flex items-center gap-4">
+                    <div className={`size-11 rounded-lg ${stat.bg} flex items-center justify-center`}>
+                      <stat.icon className={`size-5 ${stat.color}`} />
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium text-muted-foreground">{stat.label}</p>
+                      <h3 className="text-xl font-bold">{stat.value}</h3>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="grid xl:grid-cols-[1.4fr_1fr] gap-6">
+                <div className="bg-card border border-border rounded-xl overflow-hidden">
+                  <div className="p-5 border-b border-border flex items-center justify-between">
+                    <h3 className="font-semibold">Latest Surveys</h3>
+                    <button onClick={() => setActiveTab('requests')} className="text-sm text-primary hover:underline">View all</button>
+                  </div>
+                  <div className="divide-y divide-border">
+                    {sortedRequests.slice(0, 4).map(request => (
+                      <div key={request.id} className="p-5 flex items-center justify-between gap-4">
+                        <div>
+                          <div className="font-medium">{request.referenceNo || request.id}</div>
+                          <div className="text-sm text-muted-foreground">{request.surveyType} - {request.location || request.propertyDetails?.address?.street || 'Bataan'}</div>
+                        </div>
+                        <span className={`px-2.5 py-1 rounded-full text-xs border ${statusColor(request.status)}`}>
+                          {normalizeStatus(request.status).replace(/_/g, ' ')}
+                        </span>
+                      </div>
+                    ))}
+                    {sortedRequests.length === 0 && (
+                      <div className="p-8 text-center text-muted-foreground">No survey requests yet.</div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="bg-card border border-border rounded-xl p-5">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="font-semibold">Next Schedule</h3>
+                    <CalendarIcon className="size-5 text-primary" />
+                  </div>
+                  {scheduledRequests[0] ? (
+                    <div className="space-y-4">
+                      <div className="flex items-center gap-4">
+                        <div className="size-16 rounded-xl bg-primary/10 flex flex-col items-center justify-center">
+                          <span className="text-xs uppercase text-primary font-bold">
+                            {new Date(scheduledRequests[0].scheduledDate).toLocaleString('en-US', { month: 'short' })}
+                          </span>
+                          <span className="text-2xl font-bold">{new Date(scheduledRequests[0].scheduledDate).getDate()}</span>
+                        </div>
+                        <div>
+                          <div className="font-medium">{scheduledRequests[0].surveyType}</div>
+                          <div className="text-sm text-muted-foreground">{scheduledRequests[0].scheduledTime || 'Time TBA'}</div>
+                        </div>
+                      </div>
+                      <p className="text-sm text-muted-foreground">{scheduledRequests[0].location || scheduledRequests[0].propertyDetails?.address?.street || 'Bataan'}</p>
+                    </div>
+                  ) : (
+                    <div className="text-sm text-muted-foreground">No field survey has been scheduled by admin yet.</div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'requests' && (
+            <div className="space-y-6">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h2 className="text-2xl font-bold tracking-tight">My Surveys</h2>
+                  <p className="text-sm text-muted-foreground">Requests submitted here appear in the admin dashboard.</p>
+                </div>
+                <button
+                  onClick={() => setIsRequestModalOpen(true)}
+                  className="flex items-center justify-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-lg text-sm font-medium hover:opacity-90 transition-opacity"
+                >
+                  <Plus className="size-4" /> New Request
+                </button>
+              </div>
+
+              <div className="grid gap-4">
+                {sortedRequests.map((request) => (
+                  <div key={request.id} className="bg-card border border-border rounded-xl p-5 shadow-sm">
+                    <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                      <div className="space-y-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h3 className="font-semibold">{request.referenceNo || request.id}</h3>
+                          <span className={`px-2.5 py-1 rounded-full text-xs border ${statusColor(request.status)}`}>
+                            {normalizeStatus(request.status).replace(/_/g, ' ')}
+                          </span>
+                          <span className={`px-2.5 py-1 rounded-full text-xs border ${statusColor(request.paymentStatus)}`}>
+                            Payment {normalizeStatus(request.paymentStatus).replace(/_/g, ' ')}
+                          </span>
+                        </div>
+                        <div className="text-sm text-muted-foreground">{request.surveyType}</div>
+                        <div className="text-sm flex items-center gap-2">
+                          <Map className="size-4 text-muted-foreground" />
+                          {request.location || request.propertyDetails?.address?.street || 'Bataan'}
+                        </div>
+                        <div className="text-xs text-muted-foreground">Submitted {formatDate(request.submittedAt || request.createdAt)}</div>
+                      </div>
+                      <div className="flex flex-col sm:flex-row lg:flex-col gap-2 lg:items-end">
+                        <div className="text-lg font-bold">{formatCurrency(request.amount)}</div>
+                        <button
+                          onClick={() => openPaymentModal(request)}
+                          disabled={request.paymentStatus === 'paid'}
+                          className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          <CreditCard className="size-4" />
+                          {request.paymentStatus === 'paid' ? 'Paid' : 'Pay / Submit Proof'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                {sortedRequests.length === 0 && (
+                  <div className="p-12 flex flex-col items-center justify-center text-center text-muted-foreground bg-card border border-border rounded-xl">
                     <Map className="size-12 mb-4 opacity-30" />
                     <p className="text-lg font-medium">No survey requests found.</p>
                     <p className="text-sm mt-1">Click "New Request" to get started.</p>
                   </div>
-                ) : (
-                  <table className="w-full text-left text-sm">
-                    <thead className="bg-accent/50 border-b border-border text-muted-foreground">
-                      <tr>
-                        <th className="px-6 py-3 font-medium">Type</th>
-                        <th className="px-6 py-3 font-medium">Location</th>
-                        <th className="px-6 py-3 font-medium">Date Requested</th>
-                        <th className="px-6 py-3 font-medium">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border">
-                      {requests.map((req) => (
-                        <tr key={req.id} className="hover:bg-accent/30 transition-colors">
-                          <td className="px-6 py-4 font-medium">{req.surveyType}</td>
-                          <td className="px-6 py-4 text-muted-foreground">{req.location}</td>
-                          <td className="px-6 py-4 text-muted-foreground">{formatDate(req.createdAt)}</td>
-                          <td className="px-6 py-4">
-                            <span className={`px-2 py-1 rounded text-xs font-medium ${statusColor(req.status)}`}>
-                              {req.status?.replace(/_/g, ' ') || 'Pending'}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
                 )}
               </div>
-
-              {/* --- NEW: The Popup Modal UI --- */}
-              {isModalOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-in fade-in duration-200">
-                  <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200">
-                    
-                    <div className="flex items-center justify-between p-6 border-b border-border">
-                      <h2 className="text-xl font-bold flex items-center gap-2">
-                        <Map className="size-5 text-primary" />
-                        New Survey Request
-                      </h2>
-                      <button 
-                        onClick={() => setIsModalOpen(false)}
-                        className="text-muted-foreground hover:text-foreground transition-colors p-1.5 rounded-lg hover:bg-accent"
-                      >
-                        <X className="size-5" />
-                      </button>
-                    </div>
-
-                    <form onSubmit={handleSubmitRequest} className="p-6 space-y-5">
-                      <div>
-                        <label className="block text-sm font-medium mb-1.5">Type of Survey</label>
-                        <select 
-                          value={surveyType}
-                          onChange={(e) => setSurveyType(e.target.value)}
-                          className="w-full px-4 py-3 bg-input-background border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/50 transition-shadow"
-                        >
-                          <option value="Lot Plan / Relocation">Lot Plan / Relocation</option>
-                          <option value="Topographic Survey">Topographic Survey</option>
-                          <option value="Subdivision Survey">Subdivision Survey</option>
-                          <option value="Consolidation Survey">Consolidation Survey</option>
-                        </select>
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-medium mb-1.5">Property Location (Bataan)</label>
-                        <input 
-                          type="text"
-                          required
-                          placeholder="e.g., Brgy. San Ramon, Dinalupihan"
-                          value={location}
-                          onChange={(e) => setLocation(e.target.value)}
-                          className="w-full px-4 py-3 bg-input-background border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/50 placeholder:text-muted-foreground transition-shadow"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-medium mb-1.5">Additional Details (Optional)</label>
-                        <textarea 
-                          rows={3}
-                          placeholder="Any specific instructions or landmarks?"
-                          value={notes}
-                          onChange={(e) => setNotes(e.target.value)}
-                          className="w-full px-4 py-3 bg-input-background border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/50 placeholder:text-muted-foreground resize-none transition-shadow"
-                        />
-                      </div>
-
-                      <div className="pt-4 flex gap-3">
-                        <button
-                          type="button"
-                          onClick={() => setIsModalOpen(false)}
-                          className="flex-1 px-4 py-3 bg-accent hover:bg-accent/80 text-foreground rounded-xl font-medium transition-colors"
-                        >
-                          Cancel
-                        </button>
-                        <button
-                          type="submit"
-                          disabled={isSubmitting}
-                          className="flex-1 flex justify-center items-center gap-2 px-4 py-3 bg-primary text-primary-foreground rounded-xl font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:opacity-90"
-                        >
-                          {isSubmitting ? (
-                            <>
-                              <Loader2 className="size-5 animate-spin" />
-                              Submitting...
-                            </>
-                          ) : (
-                            'Submit Request'
-                          )}
-                        </button>
-                      </div>
-                    </form>
-                  </div>
-                </div>
-              )}
             </div>
           )}
 
-          {/* DOCUMENT VAULT TAB */}
+          {activeTab === 'calendar' && (
+            <div className="space-y-6">
+              <div>
+                <h2 className="text-2xl font-bold tracking-tight">Schedule</h2>
+                <p className="text-sm text-muted-foreground">Admin-approved field survey schedules appear here in real time.</p>
+              </div>
+
+              <div className="grid gap-4">
+                {scheduledRequests.map(request => (
+                  <div key={request.id} className="bg-card border border-border rounded-xl p-5 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                    <div className="flex items-center gap-4">
+                      <div className="size-16 rounded-xl bg-primary/10 flex flex-col items-center justify-center">
+                        <span className="text-xs uppercase text-primary font-bold">{new Date(request.scheduledDate).toLocaleString('en-US', { month: 'short' })}</span>
+                        <span className="text-2xl font-bold">{new Date(request.scheduledDate).getDate()}</span>
+                      </div>
+                      <div>
+                        <h3 className="font-semibold">{request.surveyType}</h3>
+                        <div className="text-sm text-muted-foreground flex items-center gap-2">
+                          <Clock className="size-4" />
+                          {request.scheduledTime || 'Time TBA'}
+                        </div>
+                        <div className="text-sm text-muted-foreground">{request.location || request.propertyDetails?.address?.street || 'Bataan'}</div>
+                      </div>
+                    </div>
+                    <span className={`px-2.5 py-1 rounded-full text-xs border self-start md:self-auto ${statusColor(request.status)}`}>
+                      {normalizeStatus(request.status).replace(/_/g, ' ')}
+                    </span>
+                  </div>
+                ))}
+                {scheduledRequests.length === 0 && (
+                  <div className="p-12 text-center text-muted-foreground bg-card border border-border rounded-xl">
+                    No field survey has been scheduled yet.
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'payments' && (
+            <div className="space-y-6">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <h2 className="text-2xl font-bold tracking-tight">Payments</h2>
+                  <p className="text-sm text-muted-foreground">Submit transaction references for admin verification.</p>
+                </div>
+                <button
+                  onClick={() => pendingPayments[0] && openPaymentModal(pendingPayments[0])}
+                  disabled={pendingPayments.length === 0}
+                  className="flex items-center justify-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-lg text-sm font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <CreditCard className="size-4" /> Submit Payment
+                </button>
+              </div>
+
+              <div className="grid md:grid-cols-3 gap-4">
+                {[
+                  { label: 'Transactions', value: payments.length, icon: Receipt, color: 'text-blue-500', bg: 'bg-blue-500/10' },
+                  { label: 'Pending Verification', value: payments.filter(payment => payment.status === 'pending').length, icon: Clock, color: 'text-amber-500', bg: 'bg-amber-500/10' },
+                  { label: 'Verified', value: verifiedPayments.length, icon: CheckCircle2, color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
+                ].map(stat => (
+                  <div key={stat.label} className="bg-card border border-border p-5 rounded-xl flex items-center gap-4">
+                    <div className={`size-11 rounded-lg ${stat.bg} flex items-center justify-center`}>
+                      <stat.icon className={`size-5 ${stat.color}`} />
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">{stat.label}</p>
+                      <div className="text-xl font-bold">{stat.value}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="bg-card border border-border rounded-xl overflow-hidden">
+                <table className="w-full text-left text-sm">
+                  <thead className="bg-accent/50 text-muted-foreground">
+                    <tr>
+                      <th className="px-5 py-3 font-medium">Reference</th>
+                      <th className="px-5 py-3 font-medium">Survey</th>
+                      <th className="px-5 py-3 font-medium">Method</th>
+                      <th className="px-5 py-3 font-medium">Amount</th>
+                      <th className="px-5 py-3 font-medium">Date</th>
+                      <th className="px-5 py-3 font-medium">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {payments.map(payment => (
+                      <tr key={payment.id} className="hover:bg-accent/30">
+                        <td className="px-5 py-4 font-medium">{payment.referenceNo}</td>
+                        <td className="px-5 py-4 text-muted-foreground">{payment.requestRef || payment.requestId}</td>
+                        <td className="px-5 py-4 uppercase">{payment.method}</td>
+                        <td className="px-5 py-4">{formatCurrency(payment.amount)}</td>
+                        <td className="px-5 py-4 text-muted-foreground">{formatDate(payment.createdAt)}</td>
+                        <td className="px-5 py-4">
+                          <span className={`px-2.5 py-1 rounded-full text-xs border ${statusColor(payment.status)}`}>
+                            {payment.status}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                    {payments.length === 0 && (
+                      <tr>
+                        <td colSpan={6} className="px-5 py-10 text-center text-muted-foreground">No payment transactions yet.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
           {activeTab === 'vault' && (
             <div className="space-y-6">
               <div>
@@ -446,16 +684,15 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
               </div>
 
               <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {/* File Upload Button */}
                 <div>
-                  <input 
-                    type="file" 
+                  <input
+                    type="file"
                     ref={fileInputRef}
                     onChange={handleFileUpload}
                     className="hidden"
                     accept=".pdf,.jpg,.jpeg,.png"
                   />
-                  <button 
+                  <button
                     onClick={() => fileInputRef.current?.click()}
                     disabled={isUploading}
                     className="w-full h-full min-h-[200px] bg-card rounded-xl border-2 border-dashed border-border p-6 hover:border-primary transition-colors flex flex-col items-center justify-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
@@ -475,26 +712,25 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
                   </button>
                 </div>
 
-                {/* Render Uploaded Documents */}
                 {userDocs.map(doc => (
                   <div key={doc.id} className="bg-card rounded-xl border border-border p-6 flex flex-col shadow-sm">
                     <div className="flex items-start justify-between mb-4">
                       <div className="size-12 bg-primary/10 rounded-lg flex items-center justify-center">
                         <FileText className="size-6 text-primary" />
                       </div>
-                      <span className={`px-2 py-1 rounded text-xs font-medium ${statusColor(doc.status)}`}>
+                      <span className={`px-2 py-1 rounded text-xs font-medium border ${statusColor(doc.status)}`}>
                         {doc.status.replace(/_/g, ' ')}
                       </span>
                     </div>
                     <h4 className="mb-1 font-medium truncate" title={doc.name}>{doc.name}</h4>
                     <p className="text-xs text-muted-foreground mb-4">
-                      {doc.fileSize} • Uploaded {formatDate(doc.uploadedAt)}
+                      {doc.fileSize} - Uploaded {formatDate(doc.uploadedAt)}
                     </p>
-                    
+
                     <div className="mt-auto pt-4 border-t border-border flex justify-end">
-                      <a 
-                        href={doc.fileUrl} 
-                        target="_blank" 
+                      <a
+                        href={doc.fileUrl}
+                        target="_blank"
                         rel="noopener noreferrer"
                         className="text-sm text-primary hover:underline font-medium"
                       >
@@ -506,9 +742,199 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
               </div>
             </div>
           )}
-
         </div>
       </main>
+
+      {isRequestModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm">
+          <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-xl overflow-hidden">
+            <div className="flex items-center justify-between p-6 border-b border-border">
+              <h2 className="text-xl font-bold flex items-center gap-2">
+                <Map className="size-5 text-primary" />
+                New Survey Request
+              </h2>
+              <button
+                onClick={() => setIsRequestModalOpen(false)}
+                className="text-muted-foreground hover:text-foreground transition-colors p-1.5 rounded-lg hover:bg-accent"
+              >
+                <X className="size-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmitRequest} className="p-6 space-y-5">
+              <div>
+                <label className="block text-sm font-medium mb-1.5">Type of Survey</label>
+                <select
+                  value={surveyType}
+                  onChange={(e) => setSurveyType(e.target.value)}
+                  className="w-full px-4 py-3 bg-input-background border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/50 transition-shadow"
+                >
+                  <option value="Lot Plan / Relocation">Lot Plan / Relocation</option>
+                  <option value="Topographic Survey">Topographic Survey</option>
+                  <option value="Subdivision Survey">Subdivision Survey</option>
+                  <option value="Consolidation Survey">Consolidation Survey</option>
+                </select>
+                <p className="mt-1 text-xs text-muted-foreground">Estimated fee: {formatCurrency(SURVEY_PRICES[surveyType])}</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1.5">Property Location (Bataan)</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g., Brgy. San Ramon, Dinalupihan"
+                  value={location}
+                  onChange={(e) => setLocation(e.target.value)}
+                  className="w-full px-4 py-3 bg-input-background border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/50 placeholder:text-muted-foreground transition-shadow"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1.5">Purpose</label>
+                <input
+                  type="text"
+                  placeholder="e.g., land titling, sale, construction permit"
+                  value={purpose}
+                  onChange={(e) => setPurpose(e.target.value)}
+                  className="w-full px-4 py-3 bg-input-background border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/50 placeholder:text-muted-foreground transition-shadow"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1.5">Additional Details (Optional)</label>
+                <textarea
+                  rows={3}
+                  placeholder="Any specific instructions or landmarks?"
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  className="w-full px-4 py-3 bg-input-background border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/50 placeholder:text-muted-foreground resize-none transition-shadow"
+                />
+              </div>
+
+              <div className="pt-4 flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setIsRequestModalOpen(false)}
+                  className="flex-1 px-4 py-3 bg-accent hover:bg-accent/80 text-foreground rounded-xl font-medium transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="flex-1 flex justify-center items-center gap-2 px-4 py-3 bg-primary text-primary-foreground rounded-xl font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:opacity-90"
+                >
+                  {isSubmitting ? (
+                    <>
+                      <Loader2 className="size-5 animate-spin" />
+                      Submitting...
+                    </>
+                  ) : (
+                    'Submit Request'
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {selectedPaymentRequest && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm">
+          <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-xl overflow-hidden">
+            <div className="flex items-center justify-between p-6 border-b border-border">
+              <div>
+                <h2 className="text-xl font-bold flex items-center gap-2">
+                  <CreditCard className="size-5 text-primary" />
+                  Submit Payment
+                </h2>
+                <p className="text-sm text-muted-foreground">{selectedPaymentRequest.referenceNo || selectedPaymentRequest.id}</p>
+              </div>
+              <button
+                onClick={() => setSelectedPaymentRequest(null)}
+                className="text-muted-foreground hover:text-foreground transition-colors p-1.5 rounded-lg hover:bg-accent"
+              >
+                <X className="size-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmitPayment} className="p-6 space-y-5">
+              <div>
+                <label className="block text-sm font-medium mb-1.5">Mode of Payment</label>
+                <div className="grid sm:grid-cols-2 gap-3">
+                  {PAYMENT_METHODS.map(method => (
+                    <button
+                      type="button"
+                      key={method.value}
+                      onClick={() => setPaymentMethod(method.value)}
+                      className={`p-4 rounded-xl border text-left transition-colors ${
+                        paymentMethod === method.value
+                          ? 'border-primary bg-primary/10'
+                          : 'border-border hover:bg-accent'
+                      }`}
+                    >
+                      <div className="font-medium">{method.label}</div>
+                      <div className="text-xs text-muted-foreground">{method.detail}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium mb-1.5">Amount</label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={paymentAmount}
+                    onChange={(e) => setPaymentAmount(e.target.value)}
+                    className="w-full px-4 py-3 bg-input-background border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/50"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1.5">Transaction Reference</label>
+                  <input
+                    type="text"
+                    value={paymentReference}
+                    onChange={(e) => setPaymentReference(e.target.value)}
+                    placeholder="GCash, bank, or receipt no."
+                    className="w-full px-4 py-3 bg-input-background border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/50 placeholder:text-muted-foreground"
+                  />
+                </div>
+              </div>
+
+              <div className="rounded-xl bg-muted/50 border border-border p-4 text-sm text-muted-foreground">
+                This creates a pending transaction for admin verification. Once admin marks it paid, your survey payment status updates.
+              </div>
+
+              <div className="pt-2 flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setSelectedPaymentRequest(null)}
+                  className="flex-1 px-4 py-3 bg-accent hover:bg-accent/80 text-foreground rounded-xl font-medium transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isPaying}
+                  className="flex-1 flex justify-center items-center gap-2 px-4 py-3 bg-primary text-primary-foreground rounded-xl font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isPaying ? (
+                    <>
+                      <Loader2 className="size-5 animate-spin" />
+                      Sending...
+                    </>
+                  ) : (
+                    'Send for Verification'
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

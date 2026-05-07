@@ -55,10 +55,13 @@ export default function LoginPage({ onBackClick, onRegisterClick, darkMode, togg
       
       {/* IMMERSIVE BACKGROUND */}
       <div className="absolute inset-0 z-0 bg-slate-950">
-        <img 
-          src="/assets/bataan-property-survey.jpg" 
-          alt="Bataan Survey Background" 
-          className="w-full h-full object-cover opacity-60"
+        <div
+          aria-hidden="true"
+          className="absolute inset-0 opacity-80"
+          style={{
+            backgroundImage:
+              'linear-gradient(135deg, rgba(15, 23, 42, 0.9), rgba(14, 116, 144, 0.55)), radial-gradient(circle at 35% 30%, rgba(255, 255, 255, 0.18), transparent 28%), repeating-linear-gradient(115deg, rgba(255,255,255,0.12) 0 1px, transparent 1px 34px)',
+          }}
         />
         <div className="absolute inset-0 bg-slate-950/60" />
         

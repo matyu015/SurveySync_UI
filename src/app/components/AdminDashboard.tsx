@@ -2,9 +2,10 @@ import { useState, useEffect } from 'react';
 import { Map, LayoutDashboard, FileText, Calendar as CalendarIcon, Users, FileCheck, CreditCard, Database, BarChart3, Settings, LogOut, Moon, Sun, Search, Filter, Download, ChevronLeft, ChevronRight, CheckCircle2, XCircle, Clock, AlertCircle, TrendingUp, DollarSign, Loader2, Trash2, ExternalLink } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line } from 'recharts';
 import { useAuth } from '../context/AuthContext';
-import { SURVEY_TYPES, BARANGAYS, mockRepositoryDocs } from '../data/mockData';
+import { SURVEY_TYPES, BARANGAYS, mockPayments, mockRepositoryDocs, mockRequests, mockUsers } from '../data/mockData';
 import { collection, query, where, onSnapshot, updateDoc, doc, deleteDoc, getFirestore } from 'firebase/firestore';
 import { getApp } from 'firebase/app';
+import { isMissingFirestoreDatabase } from '../../lib/firebaseErrors';
 
 const db = getFirestore(getApp());
 
@@ -23,10 +24,10 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
   const [searchQuery, setSearchQuery] = useState('');
   
   // Real-time Data State
-  const [requests, setRequests] = useState<any[]>([]);
-  const [clients, setClients] = useState<any[]>([]);
-  const [payments, setPayments] = useState<any[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [requests, setRequests] = useState<any[]>(mockRequests);
+  const [clients, setClients] = useState<any[]>(mockUsers.filter(user => user.role === 'client'));
+  const [payments, setPayments] = useState<any[]>(mockPayments);
+  const [isLoading, setIsLoading] = useState(false);
 
   // Management Modal State
   const [selectedRequest, setSelectedRequest] = useState<any | null>(null);
@@ -44,16 +45,34 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
 
     const unsubRequests = onSnapshot(collection(db, 'requests'), (snapshot) => {
       setRequests(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, (error) => {
+      if (!isMissingFirestoreDatabase(error)) {
+        console.error("Error loading requests:", error);
+      }
+      setRequests(mockRequests);
+      setIsLoading(false);
     });
 
     const qClients = query(collection(db, 'users'), where('role', '==', 'client'));
     const unsubClients = onSnapshot(qClients, (snapshot) => {
       setClients(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, (error) => {
+      if (!isMissingFirestoreDatabase(error)) {
+        console.error("Error loading clients:", error);
+      }
+      setClients(mockUsers.filter(user => user.role === 'client'));
+      setIsLoading(false);
     });
 
     const unsubPayments = onSnapshot(collection(db, 'payments'), (snapshot) => {
       setPayments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
       setIsLoading(false); 
+    }, (error) => {
+      if (!isMissingFirestoreDatabase(error)) {
+        console.error("Error loading payments:", error);
+      }
+      setPayments(mockPayments);
+      setIsLoading(false);
     });
 
     return () => {

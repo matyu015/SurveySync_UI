@@ -5,8 +5,9 @@ import {
   Plus, Upload, Loader2, Map, X // Added X for the modal close button
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { collection, query, where, onSnapshot, addDoc, orderBy } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, addDoc } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
+import { isMissingFirestoreDatabase } from '../../lib/firebaseErrors';
 import { supabase } from '../../lib/supabase';
 
 interface ClientDashboardProps {
@@ -53,6 +54,11 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
     const unsubscribeRequests = onSnapshot(qRequests, (snapshot) => {
       const reqData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setRequests(reqData);
+    }, (error) => {
+      if (!isMissingFirestoreDatabase(error)) {
+        console.error("Error loading survey requests:", error);
+      }
+      setRequests([]);
     });
 
     // Fetch Documents from Vault
@@ -64,6 +70,11 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
     const unsubscribeDocs = onSnapshot(qDocs, (snapshot) => {
       const docData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setUserDocs(docData);
+    }, (error) => {
+      if (!isMissingFirestoreDatabase(error)) {
+        console.error("Error loading documents:", error);
+      }
+      setUserDocs([]);
     });
 
     return () => {

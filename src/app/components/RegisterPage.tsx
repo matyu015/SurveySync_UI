@@ -3,6 +3,7 @@ import { ArrowLeft, Map, Moon, Sun, Eye, EyeOff, Loader2, User, Mail, Lock } fro
 import { useAuth } from '../context/AuthContext';
 import { doc, setDoc } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
+import { isMissingFirestoreDatabase } from '../../lib/firebaseErrors';
 
 interface RegisterPageProps {
   onBackClick: () => void;
@@ -43,13 +44,19 @@ export default function RegisterPage({ onBackClick, onLoginClick, darkMode, togg
       const userCredential = await signup(email, password);
       const user = userCredential.user;
 
-      await setDoc(doc(db, 'users', user.uid), {
-        firstName,
-        lastName,
-        email,
-        role: 'client',
-        createdAt: new Date().toISOString()
-      });
+      try {
+        await setDoc(doc(db, 'users', user.uid), {
+          firstName,
+          lastName,
+          email,
+          role: 'client',
+          createdAt: new Date().toISOString()
+        });
+      } catch (profileError) {
+        if (!isMissingFirestoreDatabase(profileError)) {
+          throw profileError;
+        }
+      }
 
     } catch (err: any) {
       console.error(err);
@@ -68,10 +75,13 @@ export default function RegisterPage({ onBackClick, onLoginClick, darkMode, togg
       
       {/* 1. IMMERSIVE BACKGROUND */}
       <div className="absolute inset-0 z-0 bg-slate-950">
-        <img 
-          src="/assets/bataan-property-survey.jpg" 
-          alt="Bataan Survey Background" 
-          className="w-full h-full object-cover opacity-60"
+        <div
+          aria-hidden="true"
+          className="absolute inset-0 opacity-80"
+          style={{
+            backgroundImage:
+              'linear-gradient(135deg, rgba(15, 23, 42, 0.9), rgba(14, 116, 144, 0.55)), radial-gradient(circle at 35% 30%, rgba(255, 255, 255, 0.18), transparent 28%), repeating-linear-gradient(115deg, rgba(255,255,255,0.12) 0 1px, transparent 1px 34px)',
+          }}
         />
         {/* Dark overlay */}
         <div className="absolute inset-0 bg-slate-950/60" />

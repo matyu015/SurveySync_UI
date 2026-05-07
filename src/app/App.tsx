@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useAuth } from './context/AuthContext';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
+import { fallbackRoleForEmail, isMissingFirestoreDatabase } from '../lib/firebaseErrors';
 import { Loader2 } from 'lucide-react';
 
 // Page Components (Ensure these paths match your folder structure)
@@ -49,16 +50,16 @@ export default function App() {
 
         if (userDoc.exists()) {
           const data = userDoc.data();
-          console.log("User Data Found:", data); // Helpful for debugging
-          setUserRole(data.role); // Sets 'admin' or 'client'
+          setUserRole(data.role || fallbackRoleForEmail(currentUser.email)); // Sets 'admin' or 'client'
         } else {
           // If the UID doesn't exist in Firestore, we default to client
-          console.warn("No user document found in Firestore. Defaulting to client.");
-          setUserRole('client');
+          setUserRole(fallbackRoleForEmail(currentUser.email));
         }
       } catch (error) {
-        console.error("Error fetching user role:", error);
-        setUserRole('client'); // Default on error to prevent app crash
+        if (!isMissingFirestoreDatabase(error)) {
+          console.error("Error fetching user role:", error);
+        }
+        setUserRole(fallbackRoleForEmail(currentUser.email)); // Default on error to prevent app crash
       } finally {
         setRoleLoading(false);
       }

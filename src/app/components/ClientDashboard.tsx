@@ -18,6 +18,7 @@ import {
   CheckCircle2,
   Receipt,
   Wallet,
+  Bell // <-- Added Bell icon
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { collection, query, where, onSnapshot, addDoc, updateDoc, doc } from 'firebase/firestore';
@@ -72,6 +73,9 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
   const [userDocs, setUserDocs] = useState<any[]>([]);
   const [payments, setPayments] = useState<any[]>([]);
   const [availabilitySlots, setAvailabilitySlots] = useState<any[]>([]);
+
+  // Notification State
+  const [showNotifications, setShowNotifications] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -145,6 +149,48 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
       unsubscribeAvailability();
     };
   }, [currentUser]);
+
+  // --- CLIENT NOTIFICATION LOGIC ---
+  const notificationItems = [
+    // 1. Scheduled Surveys
+    ...requests.filter(r => r.scheduledDate && r.status !== 'completed' && r.status !== 'cancelled').map(r => ({
+      id: `sched-${r.id}`,
+      type: 'request',
+      title: 'Survey Scheduled',
+      desc: `Your ${r.surveyType} is scheduled for ${new Date(r.scheduledDate).toLocaleDateString()} at ${r.scheduledTime || 'TBA'}.`,
+      date: r.createdAt || new Date().toISOString(), 
+      ref: r.referenceNo || r.id
+    })),
+    // 2. Verified Payments
+    ...payments.filter(p => p.status === 'paid').map(p => ({
+      id: `pay-${p.id}`,
+      type: 'payment',
+      title: 'Payment Verified',
+      desc: `Your payment of ₱${Number(p.amount).toLocaleString()} has been successfully verified!`,
+      date: p.paidAt || p.createdAt || new Date().toISOString(),
+      ref: p.referenceNo || p.id
+    })),
+    // 3. Completed Surveys
+    ...requests.filter(r => r.status === 'completed').map(r => ({
+      id: `comp-${r.id}`,
+      type: 'request',
+      title: 'Survey Completed',
+      desc: `Your ${r.surveyType} has been completed by the surveyor.`,
+      date: r.createdAt || new Date().toISOString(),
+      ref: r.referenceNo || r.id
+    }))
+  ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+  const totalNotifications = notificationItems.length;
+
+  const handleNotificationClick = (item: any) => {
+    setShowNotifications(false);
+    if (item.type === 'request') {
+      setActiveTab('requests');
+    } else if (item.type === 'payment') {
+      setActiveTab('payments');
+    }
+  };
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -226,7 +272,6 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
         },
       };
 
-      // Pure live database submission
       await addDoc(collection(db, 'requests'), requestPayload);
 
       setIsRequestModalOpen(false);
@@ -288,7 +333,6 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
         bookedAt: new Date().toISOString(),
       };
 
-      // Pure live database update
       await updateDoc(doc(db, 'requests', selectedRequest.id), requestScheduleUpdate);
       await updateDoc(doc(db, 'availability', slot.id), slotBookingUpdate);
 
@@ -328,7 +372,6 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
 
       const requestPaymentUpdate = { paymentStatus: 'partial' };
 
-      // Pure live database submission
       await addDoc(collection(db, 'payments'), paymentPayload);
       await updateDoc(doc(db, 'requests', selectedPaymentRequest.id), requestPaymentUpdate);
 
@@ -505,6 +548,51 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
           </div>
 
           <div className="flex items-center gap-4">
+            
+            {/* --- CLIENT NOTIFICATION BELL --- */}
+            <div className="relative">
+              <button 
+                onClick={() => setShowNotifications(!showNotifications)}
+                className="p-2 rounded-full hover:bg-accent text-muted-foreground transition-colors relative"
+              >
+                <Bell className="size-5" />
+                {totalNotifications > 0 && (
+                  <span className="absolute top-1 right-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white ring-2 ring-card">
+                    {totalNotifications > 99 ? '99+' : totalNotifications}
+                  </span>
+                )}
+              </button>
+
+              {/* Dropdown Menu */}
+              {showNotifications && (
+                <div className="absolute right-0 mt-3 w-80 bg-card border border-border rounded-xl shadow-2xl z-50 overflow-hidden">
+                  <div className="p-3 border-b border-border bg-muted/30 font-semibold flex justify-between items-center">
+                    Notifications
+                    <span className="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full">{totalNotifications} updates</span>
+                  </div>
+                  <div className="max-h-80 overflow-y-auto divide-y divide-border">
+                    {notificationItems.length > 0 ? (
+                      notificationItems.map(item => (
+                        <div 
+                          key={item.id} 
+                          onClick={() => handleNotificationClick(item)}
+                          className="p-4 hover:bg-accent/50 cursor-pointer transition-colors text-left"
+                        >
+                          <div className="text-xs font-bold text-primary mb-1 uppercase tracking-wider">{item.title} • {item.ref}</div>
+                          <div className="text-sm font-medium leading-snug">{item.desc}</div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="p-8 text-center text-muted-foreground text-sm flex flex-col items-center gap-2">
+                        <CheckCircle2 className="size-8 opacity-20" />
+                        No new updates yet!
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
             <button onClick={toggleDarkMode} className="p-2 rounded-full hover:bg-accent text-muted-foreground transition-colors">
               {darkMode ? <Sun className="size-5" /> : <Moon className="size-5" />}
             </button>

@@ -22,8 +22,6 @@ import {
 import { useAuth } from '../context/AuthContext';
 import { collection, query, where, onSnapshot, addDoc, updateDoc, doc } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
-import { isMissingFirestoreDatabase } from '../../lib/firebaseErrors';
-import { addLocalDoc, getLocalCollection, mergeLocalDocuments, subscribeLocalCollection, updateLocalDoc } from '../../lib/localStore';
 import { supabase } from '../../lib/supabase';
 import MonthCalendar from './MonthCalendar';
 
@@ -96,74 +94,48 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
   useEffect(() => {
     if (!currentUser) return;
 
-    const getLocalUserRequests = () => getLocalCollection('requests').filter((request: any) => request.clientId === currentUser.uid);
-    const getLocalUserPayments = () => getLocalCollection('payments').filter((payment: any) => payment.clientId === currentUser.uid);
-
+    // 1. Live Survey Requests
     const qRequests = query(
       collection(db, 'requests'),
       where('clientId', '==', currentUser.uid)
     );
-
     const unsubscribeRequests = onSnapshot(qRequests, (snapshot) => {
       const reqData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setRequests(mergeLocalDocuments(reqData, getLocalUserRequests()));
+      setRequests(reqData);
     }, (error) => {
-      if (!isMissingFirestoreDatabase(error)) {
-        console.error("Error loading survey requests:", error);
-      }
-      setRequests(getLocalUserRequests());
+      console.error("Error loading survey requests:", error);
     });
 
+    // 2. Live Documents
     const qDocs = query(
       collection(db, 'documents'),
       where('clientId', '==', currentUser.uid)
     );
-
     const unsubscribeDocs = onSnapshot(qDocs, (snapshot) => {
       const docData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setUserDocs(docData);
     }, (error) => {
-      if (!isMissingFirestoreDatabase(error)) {
-        console.error("Error loading documents:", error);
-      }
-      setUserDocs([]);
+      console.error("Error loading documents:", error);
     });
 
+    // 3. Live Payments
     const qPayments = query(
       collection(db, 'payments'),
       where('clientId', '==', currentUser.uid)
     );
-
     const unsubscribePayments = onSnapshot(qPayments, (snapshot) => {
       const paymentData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setPayments(mergeLocalDocuments(paymentData, getLocalUserPayments()));
+      setPayments(paymentData);
     }, (error) => {
-      if (!isMissingFirestoreDatabase(error)) {
-        console.error("Error loading payments:", error);
-      }
-      setPayments(getLocalUserPayments());
+      console.error("Error loading payments:", error);
     });
 
+    // 4. Live Schedule Availability
     const unsubscribeAvailability = onSnapshot(collection(db, 'availability'), (snapshot) => {
       const slotData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setAvailabilitySlots(mergeLocalDocuments(slotData, getLocalCollection('availability')));
+      setAvailabilitySlots(slotData);
     }, (error) => {
-      if (!isMissingFirestoreDatabase(error)) {
-        console.error("Error loading availability:", error);
-      }
-      setAvailabilitySlots(getLocalCollection('availability'));
-    });
-
-    const unsubscribeLocalRequests = subscribeLocalCollection('requests', (localRequests) => {
-      setRequests(prev => mergeLocalDocuments(prev, localRequests.filter((request: any) => request.clientId === currentUser.uid)));
-    });
-
-    const unsubscribeLocalPayments = subscribeLocalCollection('payments', (localPayments) => {
-      setPayments(prev => mergeLocalDocuments(prev, localPayments.filter((payment: any) => payment.clientId === currentUser.uid)));
-    });
-
-    const unsubscribeLocalAvailability = subscribeLocalCollection('availability', (localSlots) => {
-      setAvailabilitySlots(prev => mergeLocalDocuments(prev, localSlots));
+      console.error("Error loading availability:", error);
     });
 
     return () => {
@@ -171,9 +143,6 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
       unsubscribeDocs();
       unsubscribePayments();
       unsubscribeAvailability();
-      unsubscribeLocalRequests();
-      unsubscribeLocalPayments();
-      unsubscribeLocalAvailability();
     };
   }, [currentUser]);
 
@@ -257,13 +226,8 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
         },
       };
 
-      try {
-        await addDoc(collection(db, 'requests'), requestPayload);
-      } catch (firestoreError) {
-        console.error("Firestore request submit failed, saving locally:", firestoreError);
-        addLocalDoc('requests', requestPayload);
-        alert("Request saved locally for this browser. To sync across devices, enable Firestore in Firebase.");
-      }
+      // Pure live database submission
+      await addDoc(collection(db, 'requests'), requestPayload);
 
       setIsRequestModalOpen(false);
       setLocation('');
@@ -274,7 +238,7 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
       setActiveTab('requests');
     } catch (error) {
       console.error("Error submitting request: ", error);
-      alert("Failed to submit request. Please check Firebase/Firestore configuration.");
+      alert("Failed to submit request. Please check your internet connection.");
     } finally {
       setIsSubmitting(false);
     }
@@ -324,17 +288,9 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
         bookedAt: new Date().toISOString(),
       };
 
-      if (selectedRequest._localOnly) {
-        updateLocalDoc('requests', selectedRequest.id, requestScheduleUpdate);
-      } else {
-        await updateDoc(doc(db, 'requests', selectedRequest.id), requestScheduleUpdate);
-      }
-
-      if (slot._localOnly) {
-        updateLocalDoc('availability', slot.id, slotBookingUpdate);
-      } else {
-        await updateDoc(doc(db, 'availability', slot.id), slotBookingUpdate);
-      }
+      // Pure live database update
+      await updateDoc(doc(db, 'requests', selectedRequest.id), requestScheduleUpdate);
+      await updateDoc(doc(db, 'availability', slot.id), slotBookingUpdate);
 
       setSelectedScheduleRequestId('');
     } catch (error) {
@@ -372,24 +328,15 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
 
       const requestPaymentUpdate = { paymentStatus: 'partial' };
 
-      try {
-        await addDoc(collection(db, 'payments'), paymentPayload);
-      } catch (firestoreError) {
-        console.error("Firestore payment submit failed, saving locally:", firestoreError);
-        addLocalDoc('payments', paymentPayload);
-      }
-
-      if (selectedPaymentRequest._localOnly) {
-        updateLocalDoc('requests', selectedPaymentRequest.id, requestPaymentUpdate);
-      } else {
-        await updateDoc(doc(db, 'requests', selectedPaymentRequest.id), requestPaymentUpdate);
-      }
+      // Pure live database submission
+      await addDoc(collection(db, 'payments'), paymentPayload);
+      await updateDoc(doc(db, 'requests', selectedPaymentRequest.id), requestPaymentUpdate);
 
       setSelectedPaymentRequest(null);
       setActiveTab('payments');
     } catch (error) {
       console.error("Payment submission failed:", error);
-      alert("Failed to submit payment. Please check Firebase/Firestore configuration.");
+      alert("Failed to submit payment. Please check your internet connection.");
     } finally {
       setIsPaying(false);
     }

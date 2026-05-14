@@ -4,13 +4,12 @@ import { initializeFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage"; 
 
 const firebaseConfig = {
-  apiKey: "AIzaSyDzUipopHKH65hPw6GEFB4fJXug6zpkM3A",
-  authDomain: "surveysync-972c1.firebaseapp.com",
-  projectId: "surveysync-972c1",
-  storageBucket: "surveysync-972c1.firebasestorage.app",
-  messagingSenderId: "1045530050984",
-  appId: "1:1045530050984:web:deab0d51727dbcb3ab9d9d",
-  measurementId: "G-YBFVDR30LN"
+  apiKey: "AIzaSyDErZDJyft_Ro5qhSGTM7UggAlgVTc51rg",
+  authDomain: "surveysync-live.firebaseapp.com",
+  projectId: "surveysync-live",
+  storageBucket: "surveysync-live.firebasestorage.app",
+  messagingSenderId: "465197588737",
+  appId: "1:465197588737:web:b9e671b45cfa9d0f93bb00"
 };
 
 const app = initializeApp(firebaseConfig);

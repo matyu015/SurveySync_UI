@@ -1018,22 +1018,73 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
             <form onSubmit={handleSubmitPayment} className="p-6 space-y-5">
               <div>
                 <label className="block text-sm font-medium mb-1.5">Mode of Payment</label>
-                <div className="grid sm:grid-cols-2 gap-3">
-                  {PAYMENT_METHODS.map(method => (
-                    <button
-                      type="button"
-                      key={method.value}
-                      onClick={() => setPaymentMethod(method.value)}
-                      className={`p-4 rounded-xl border text-left transition-colors ${
-                        paymentMethod === method.value
-                          ? 'border-primary bg-primary/10'
-                          : 'border-border hover:bg-accent'
-                      }`}
-                    >
-                      <div className="font-medium">{method.label}</div>
-                      <div className="text-xs text-muted-foreground">{method.detail}</div>
-                    </button>
-                  ))}
+                <div className="grid sm:grid-cols-2 gap-4">
+                  {/* 1. GCash Button */}
+                  <button 
+                    type="button"
+                    onClick={() => setPaymentMethod('gcash')} 
+                    className={`p-4 rounded-xl border text-left transition-all ${paymentMethod === 'gcash' ? 'border-primary bg-primary/5 ring-1 ring-primary' : 'border-border hover:bg-accent'}`}
+                  >
+                    <div className="flex items-center gap-2 mb-1">
+                      <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <rect width="24" height="24" rx="6" fill="#007DFE"/>
+                        <path d="M15 12h-3v2h1.5a2.5 2.5 0 0 1-3 1.5 2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 2 .9l1.5-1.4A4.5 4.5 0 1 0 12 16.5a4.5 4.5 0 0 0 4.5-4.5V12z" fill="white"/>
+                      </svg>
+                      <span className="font-bold text-[#007DFE] tracking-wide">GCash</span>
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-1">Mobile wallet transfer</div>
+                  </button>
+
+                  {/* 2. Bank Transfer Button */}
+                  <button 
+                    type="button"
+                    onClick={() => setPaymentMethod('bank')} 
+                    className={`p-4 rounded-xl border text-left transition-all ${paymentMethod === 'bank' ? 'border-primary bg-primary/5 ring-1 ring-primary' : 'border-border hover:bg-accent'}`}
+                  >
+                    <div className="flex items-center gap-2 mb-1">
+                      <div className="bg-indigo-100 p-1.5 rounded-lg">
+                        <svg className="h-4 w-4 text-indigo-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <line x1="3" y1="22" x2="21" y2="22"></line><line x1="6" y1="18" x2="6" y2="11"></line><line x1="10" y1="18" x2="10" y2="11"></line><line x1="14" y1="18" x2="14" y2="11"></line><line x1="18" y1="18" x2="18" y2="11"></line><polygon points="12 2 20 7 4 7"></polygon>
+                        </svg>
+                      </div>
+                      <span className="font-bold text-foreground">Bank Transfer</span>
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-1">Online or branch deposit</div>
+                  </button>
+
+                  {/* 3. Over the Counter Button */}
+                  <button 
+                    type="button"
+                    onClick={() => setPaymentMethod('otc')} 
+                    className={`p-4 rounded-xl border text-left transition-all ${paymentMethod === 'otc' ? 'border-primary bg-primary/5 ring-1 ring-primary' : 'border-border hover:bg-accent'}`}
+                  >
+                    <div className="flex items-center gap-2 mb-1">
+                      <div className="bg-orange-100 p-1.5 rounded-lg">
+                        <svg className="h-4 w-4 text-orange-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline>
+                        </svg>
+                      </div>
+                      <span className="font-bold text-foreground">Over the Counter</span>
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-1">Partner payment center</div>
+                  </button>
+
+                  {/* 4. Cash Button */}
+                  <button 
+                    type="button"
+                    onClick={() => setPaymentMethod('cash')} 
+                    className={`p-4 rounded-xl border text-left transition-all ${paymentMethod === 'cash' ? 'border-primary bg-primary/5 ring-1 ring-primary' : 'border-border hover:bg-accent'}`}
+                  >
+                    <div className="flex items-center gap-2 mb-1">
+                      <div className="bg-emerald-100 p-1.5 rounded-lg">
+                        <svg className="h-4 w-4 text-emerald-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <rect x="2" y="6" width="20" height="12" rx="2"></rect><circle cx="12" cy="12" r="2"></circle><path d="M6 12h.01M18 12h.01"></path>
+                        </svg>
+                      </div>
+                      <span className="font-bold text-foreground">Cash</span>
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-1">Pay at the office</div>
+                  </button>
                 </div>
               </div>
 

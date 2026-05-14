@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
-import { Map, LayoutDashboard, FileText, Calendar as CalendarIcon, Users, FileCheck, CreditCard, Database, BarChart3, Settings, LogOut, Moon, Sun, Search, Filter, Download, ChevronLeft, ChevronRight, CheckCircle2, XCircle, Clock, AlertCircle, TrendingUp, DollarSign, Loader2, Trash2, ExternalLink } from 'lucide-react';
+import { Map, LayoutDashboard, FileText, Calendar as CalendarIcon, Users, FileCheck, CreditCard, BarChart3, Settings, LogOut, Moon, Sun, Search, Filter, Download, ChevronLeft, ChevronRight, CheckCircle2, XCircle, Clock, AlertCircle, TrendingUp, Loader2, Trash2, ExternalLink } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line } from 'recharts';
 import { useAuth } from '../context/AuthContext';
-import { SURVEY_TYPES, BARANGAYS, mockPayments, mockRepositoryDocs, mockRequests, mockUsers } from '../data/mockData';
+import { SURVEY_TYPES, BARANGAYS, mockPayments, mockRequests, mockUsers } from '../data/mockData';
 import { collection, query, where, onSnapshot, updateDoc, doc, deleteDoc, addDoc, getFirestore } from 'firebase/firestore';
 import { getApp } from 'firebase/app';
 import { isMissingFirestoreDatabase } from '../../lib/firebaseErrors';
@@ -11,13 +11,33 @@ import MonthCalendar, { formatDateKey } from './MonthCalendar';
 
 const db = getFirestore(getApp());
 
+// Custom bulletproof Peso Icon to avoid lucide-react version errors
+const PesoIcon = ({ className }: { className?: string }) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+  >
+    <path d="M20 11H4" />
+    <path d="M20 15H4" />
+    <path d="M7 21V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v17" />
+    <path d="M7 11h6a4 4 0 0 0 0-8H7" />
+  </svg>
+);
+
 interface AdminDashboardProps {
   onLogout: () => void;
   darkMode: boolean;
   toggleDarkMode: () => void;
 }
 
-type Tab = 'dashboard' | 'requests' | 'calendar' | 'clients' | 'documents' | 'payments' | 'repository' | 'reports' | 'staff' | 'settings';
+// Removed 'repository' from the Tab type
+type Tab = 'dashboard' | 'requests' | 'calendar' | 'clients' | 'documents' | 'payments' | 'reports' | 'staff' | 'settings';
 
 export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: AdminDashboardProps) {
   const { logout } = useAuth();
@@ -182,7 +202,6 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
     }
   };
 
-  // --- NEW CANCEL FUNCTION ---
   const handleCancelRequest = async (requestId: string) => {
     if (!window.confirm("Are you sure you want to cancel this request? This will mark it as Cancelled in the database.")) return;
     setIsUpdating(true);
@@ -319,7 +338,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
       available: 'bg-success/10 text-success border-success/20',
       unavailable: 'bg-destructive/10 text-destructive border-destructive/20',
       booked: 'bg-blue-500/10 text-blue-500 border-blue-500/20',
-      cancelled: 'bg-red-500/10 text-red-500 border-red-500/20', // NEW CANCELLED COLOR
+      cancelled: 'bg-red-500/10 text-red-500 border-red-500/20',
     };
     return colors[status] || 'bg-muted text-muted-foreground border-border';
   };
@@ -401,6 +420,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
           </div>
 
           <nav className="flex-1 p-4 space-y-1">
+            {/* Removed AI Repository from Navigation */}
             {[
               { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
               { id: 'requests', label: 'Requests', icon: FileText },
@@ -408,7 +428,6 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
               { id: 'clients', label: 'Clients', icon: Users },
               { id: 'documents', label: 'Document Review', icon: FileCheck },
               { id: 'payments', label: 'Payments', icon: CreditCard },
-              { id: 'repository', label: 'AI Repository', icon: Database },
             ].map(item => (
               <button
                 key={item.id}
@@ -451,11 +470,12 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
             {activeTab === 'dashboard' && (
               <div className="space-y-6">
                 <div className="grid md:grid-cols-4 gap-4">
+                  {/* Updated the Revenue stat to use the PesoIcon */}
                   {[
                     { label: 'Total Requests', value: requests.length, icon: FileText, color: 'bg-blue-500' },
                     { label: 'Pending Review', value: requests.filter(r => r.status === 'under_review' || r.status === 'submitted').length, icon: Clock, color: 'bg-warning' },
                     { label: 'Upcoming Surveys', value: requests.filter(r => r.scheduledDate).length, icon: CalendarIcon, color: 'bg-purple-500' },
-                    { label: 'Revenue', value: `₱${payments.filter(p => p.status === 'paid').reduce((sum, p) => sum + p.amount, 0).toLocaleString()}`, icon: DollarSign, color: 'bg-success' }
+                    { label: 'Revenue', value: `₱${payments.filter(p => p.status === 'paid').reduce((sum, p) => sum + p.amount, 0).toLocaleString()}`, icon: PesoIcon, color: 'bg-success' }
                   ].map(stat => (
                     <div key={stat.label} className="bg-card p-6 rounded-xl border border-border">
                       <div className={`size-12 ${stat.color}/10 rounded-lg flex items-center justify-center mb-4`}>

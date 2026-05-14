@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Map, LayoutDashboard, FileText, Calendar as CalendarIcon, Users, FileCheck, CreditCard, BarChart3, Settings, LogOut, Moon, Sun, Search, Filter, Download, ChevronLeft, ChevronRight, CheckCircle2, XCircle, Clock, AlertCircle, TrendingUp, Loader2, Trash2, ExternalLink } from 'lucide-react';
+import { Map, LayoutDashboard, FileText, Calendar as CalendarIcon, Users, FileCheck, CreditCard, BarChart3, Settings, LogOut, Moon, Sun, Search, Filter, Download, ChevronLeft, ChevronRight, CheckCircle2, XCircle, Clock, AlertCircle, TrendingUp, Loader2, Trash2, ExternalLink, Bell } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line } from 'recharts';
 import { useAuth } from '../context/AuthContext';
 import { SURVEY_TYPES, BARANGAYS, mockPayments, mockRequests, mockUsers } from '../data/mockData';
@@ -11,7 +11,7 @@ import MonthCalendar, { formatDateKey } from './MonthCalendar';
 
 const db = getFirestore(getApp());
 
-// Custom bulletproof Peso Icon to avoid lucide-react version errors
+// Custom bulletproof Peso Icon
 const PesoIcon = ({ className }: { className?: string }) => (
   <svg
     xmlns="http://www.w3.org/2000/svg"
@@ -36,7 +36,6 @@ interface AdminDashboardProps {
   toggleDarkMode: () => void;
 }
 
-// Removed 'repository' from the Tab type
 type Tab = 'dashboard' | 'requests' | 'calendar' | 'clients' | 'documents' | 'payments' | 'reports' | 'staff' | 'settings';
 
 export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: AdminDashboardProps) {
@@ -52,6 +51,9 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
   const [availabilitySlots, setAvailabilitySlots] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [adminCalendarMonth, setAdminCalendarMonth] = useState(new Date());
+
+  // Notification State
+  const [showNotifications, setShowNotifications] = useState(false);
 
   // Management Modal State
   const [selectedRequest, setSelectedRequest] = useState<any | null>(null);
@@ -112,31 +114,51 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
       setAvailabilitySlots(getLocalCollection('availability'));
     });
 
-    const unsubscribeLocalRequests = subscribeLocalCollection('requests', (localRequests) => {
-      setRequests(prev => mergeLocalDocuments(prev, localRequests));
-    });
-
-    const unsubscribeLocalPayments = subscribeLocalCollection('payments', (localPayments) => {
-      setPayments(prev => mergeLocalDocuments(prev, localPayments));
-    });
-
-    const unsubscribeLocalAvailability = subscribeLocalCollection('availability', (localSlots) => {
-      setAvailabilitySlots(prev => mergeLocalDocuments(prev, localSlots));
-    });
-
     return () => {
       unsubRequests();
       unsubClients();
       unsubPayments();
       unsubAvailability();
-      unsubscribeLocalRequests();
-      unsubscribeLocalPayments();
-      unsubscribeLocalAvailability();
     };
   }, []);
 
+  // --- NOTIFICATION LOGIC ---
+  const pendingRequests = requests.filter(r => r.status === 'submitted' || r.status === 'under_review');
+  const pendingPaymentList = payments.filter(p => p.status === 'pending');
+  const totalNotifications = pendingRequests.length + pendingPaymentList.length;
+
+  const notificationItems = [
+    ...pendingRequests.map(r => ({
+      id: r.id,
+      type: 'request',
+      title: 'New Survey Request',
+      desc: `${r.clientName} submitted a ${r.surveyType}`,
+      date: r.submittedAt || r.createdAt || new Date().toISOString(),
+      ref: r.referenceNo
+    })),
+    ...pendingPaymentList.map(p => ({
+      id: p.id,
+      type: 'payment',
+      title: 'Payment Verification',
+      desc: `${p.clientName} submitted a payment of ₱${p.amount.toLocaleString()}`,
+      date: p.createdAt || new Date().toISOString(),
+      ref: p.referenceNo
+    }))
+  ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+  const handleNotificationClick = (item: any) => {
+    setShowNotifications(false);
+    if (item.type === 'request') {
+      setActiveTab('requests');
+      const req = requests.find(r => r.id === item.id);
+      if (req) setSelectedRequest(req);
+    } else if (item.type === 'payment') {
+      setActiveTab('payments');
+    }
+  };
+
+
   // --- MANAGEMENT ACTIONS ---
-  
   const handleUpdateStatus = async (requestId: string, newStatus: string) => {
     setIsUpdating(true);
     try {
@@ -246,9 +268,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
       try {
         await addDoc(collection(db, 'availability'), slotPayload);
       } catch (firestoreError) {
-        console.error("Firestore availability save failed, saving locally:", firestoreError);
-        addLocalDoc('availability', slotPayload);
-        alert("Availability saved locally for this browser. To sync across devices, enable Firestore in Firebase.");
+        console.error("Firestore availability save failed:", firestoreError);
       }
     } catch (error) {
       console.error("Error saving availability:", error);
@@ -384,14 +404,6 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
 
   const selectedAvailabilitySlots = sortedAvailability.filter(slot => slot.date === availabilityDate);
 
-  // --- CHART DATA ---
-  const requestsByType = SURVEY_TYPES.map(type => ({
-    name: type.name.split(' /')[0],
-    value: requests.filter(r => r.surveyType === type.name).length
-  })).filter(item => item.value > 0);
-
-  const COLORS = ['#14B8A6', '#0D1B3E', '#F59E0B', '#16A34A', '#DC2626', '#6366F1', '#EC4899'];
-
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
@@ -420,7 +432,6 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
           </div>
 
           <nav className="flex-1 p-4 space-y-1">
-            {/* Removed AI Repository from Navigation */}
             {[
               { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
               { id: 'requests', label: 'Requests', icon: FileText },
@@ -450,14 +461,63 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
         </aside>
 
         {/* MAIN CONTENT */}
-        <main className="flex-1 overflow-auto">
+        <main className="flex-1 overflow-auto relative">
           <header className="bg-card border-b border-border px-8 py-6 sticky top-0 z-30 flex justify-between items-center">
             <h2 className="text-2xl font-semibold capitalize">{activeTab}</h2>
-            <div className="flex gap-4">
+            <div className="flex items-center gap-4">
+               
+               {/* --- NOTIFICATION BELL --- */}
+               <div className="relative">
+                  <button 
+                    onClick={() => setShowNotifications(!showNotifications)}
+                    className="p-2 border border-border rounded-lg relative hover:bg-accent transition-colors"
+                  >
+                    <Bell className="size-5" />
+                    {totalNotifications > 0 && (
+                      <span className="absolute -top-1.5 -right-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white ring-2 ring-card">
+                        {totalNotifications > 99 ? '99+' : totalNotifications}
+                      </span>
+                    )}
+                  </button>
+
+                  {/* Dropdown Menu */}
+                  {showNotifications && (
+                    <div className="absolute right-0 mt-3 w-80 bg-card border border-border rounded-xl shadow-2xl z-50 overflow-hidden">
+                      <div className="p-3 border-b border-border bg-muted/30 font-semibold flex justify-between items-center">
+                        Notifications
+                        <span className="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full">{totalNotifications} new</span>
+                      </div>
+                      <div className="max-h-80 overflow-y-auto divide-y divide-border">
+                        {notificationItems.length > 0 ? (
+                          notificationItems.map(item => (
+                            <div 
+                              key={`${item.type}-${item.id}`} 
+                              onClick={() => handleNotificationClick(item)}
+                              className="p-4 hover:bg-accent/50 cursor-pointer transition-colors"
+                            >
+                              <div className="text-xs font-bold text-primary mb-1 uppercase tracking-wider">{item.title} • {item.ref}</div>
+                              <div className="text-sm font-medium leading-snug">{item.desc}</div>
+                              <div className="text-xs text-muted-foreground mt-2 flex items-center gap-1">
+                                <Clock className="size-3" />
+                                {new Date(item.date).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}
+                              </div>
+                            </div>
+                          ))
+                        ) : (
+                          <div className="p-8 text-center text-muted-foreground text-sm flex flex-col items-center gap-2">
+                            <CheckCircle2 className="size-8 opacity-20" />
+                            You're all caught up!
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+               </div>
+
                <button onClick={toggleDarkMode} className="p-2 border border-border rounded-lg">
                   {darkMode ? <Sun className="size-5" /> : <Moon className="size-5" />}
                </button>
-               <div className="relative">
+               <div className="relative hidden md:block">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
                   <input type="text" placeholder="Search..." className="pl-9 pr-4 py-2 border rounded-lg bg-background w-64" />
                </div>
@@ -470,10 +530,9 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
             {activeTab === 'dashboard' && (
               <div className="space-y-6">
                 <div className="grid md:grid-cols-4 gap-4">
-                  {/* Updated the Revenue stat to use the PesoIcon */}
                   {[
                     { label: 'Total Requests', value: requests.length, icon: FileText, color: 'bg-blue-500' },
-                    { label: 'Pending Review', value: requests.filter(r => r.status === 'under_review' || r.status === 'submitted').length, icon: Clock, color: 'bg-warning' },
+                    { label: 'Pending Review', value: pendingRequests.length, icon: Clock, color: 'bg-warning' },
                     { label: 'Upcoming Surveys', value: requests.filter(r => r.scheduledDate).length, icon: CalendarIcon, color: 'bg-purple-500' },
                     { label: 'Revenue', value: `₱${payments.filter(p => p.status === 'paid').reduce((sum, p) => sum + p.amount, 0).toLocaleString()}`, icon: PesoIcon, color: 'bg-success' }
                   ].map(stat => (
@@ -749,7 +808,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                 <div className="grid md:grid-cols-3 gap-4">
                   {[
                     { label: 'Total Collected', value: `₱${payments.filter(p => p.status === 'paid').reduce((sum, p) => sum + p.amount, 0).toLocaleString()}`, icon: CheckCircle2, color: 'bg-success' },
-                    { label: 'Pending Verification', value: `₱${payments.filter(p => p.status === 'pending').reduce((sum, p) => sum + p.amount, 0).toLocaleString()}`, icon: Clock, color: 'bg-warning' },
+                    { label: 'Pending Verification', value: `₱${pendingPaymentList.reduce((sum, p) => sum + p.amount, 0).toLocaleString()}`, icon: Clock, color: 'bg-warning' },
                     { label: 'Total Transactions', value: payments.length, icon: CreditCard, color: 'bg-blue-500' }
                   ].map(stat => (
                     <div key={stat.label} className="bg-card p-6 rounded-xl border border-border">
@@ -892,7 +951,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                    </div>
                 )}
 
-{/* Details Grid */}
+                {/* Details Grid */}
                 <div className="grid grid-cols-2 gap-6">
                   <div className="space-y-4">
                     <h4 className="text-sm font-bold border-b border-border pb-1">Client Information</h4>
@@ -900,14 +959,21 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                       <div className="text-muted-foreground">Name</div>
                       <div className="font-medium">{selectedRequest.clientName}</div>
                     </div>
+                    {/* Upgraded Payment Badge */}
                     <div className="text-sm pt-2">
                       <div className="text-muted-foreground mb-2">Payment Status</div>
                       <span className={`px-3 py-1.5 rounded-md text-xs font-bold uppercase tracking-wider border ${
                         selectedRequest.paymentStatus === 'paid' 
                           ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20' 
+                          : selectedRequest.paymentStatus === 'partial'
+                          ? 'bg-blue-500/10 text-blue-500 border-blue-500/20'
                           : 'bg-amber-500/10 text-amber-500 border-amber-500/20'
                       }`}>
-                        {selectedRequest.paymentStatus === 'paid' ? 'Paid' : 'Unpaid'}
+                        {selectedRequest.paymentStatus === 'paid' 
+                          ? 'Paid' 
+                          : selectedRequest.paymentStatus === 'partial' 
+                          ? 'Pending Verification' 
+                          : 'Unpaid'}
                       </span>
                     </div>
                   </div>
@@ -925,7 +991,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                   </div>
                 </div>
 
-                <div className="pt-6 border-t border-border flex justify-between items-center">
+                <div className="pt-6 border-t border-border flex justify-between">
                    <div className="flex gap-2">
                      <button 
                       onClick={() => handleDeleteRequest(selectedRequest.id)}
@@ -940,7 +1006,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                         <XCircle className="size-4" /> Cancel Request
                      </button>
                    </div>
-                   <button onClick={() => setSelectedRequest(null)} className="px-6 py-2 bg-foreground text-background rounded-lg text-sm font-bold hover:opacity-90">
+                   <button onClick={() => setSelectedRequest(null)} className="px-6 py-2 bg-foreground text-background rounded-lg text-sm font-bold">
                       Close Panel
                    </button>
                 </div>

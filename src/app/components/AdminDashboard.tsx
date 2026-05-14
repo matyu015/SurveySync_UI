@@ -891,30 +891,78 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
 
               <div className="p-8 space-y-6">
                 
-                {/* Status Updater */}
-                <div className="bg-primary/5 border border-primary/20 p-4 rounded-xl flex items-center justify-between">
-                  <div>
-                    <div className="text-xs uppercase text-primary font-bold mb-1">Current Status</div>
-                    <div className="text-lg capitalize font-medium">{selectedRequest.status.replace(/_/g, ' ')}</div>
+{/* Status Updater & Quick Actions */}
+                <div className="space-y-3">
+                  <div className="bg-primary/5 border border-primary/20 p-4 rounded-xl flex items-center justify-between">
+                    <div>
+                      <div className="text-xs uppercase text-primary font-bold mb-1">Current Status</div>
+                      <div className="text-lg capitalize font-medium">{selectedRequest.status.replace(/_/g, ' ')}</div>
+                    </div>
+                    <div className="flex gap-2">
+                      <select 
+                        disabled={isUpdating}
+                        value={selectedRequest.status}
+                        onChange={(e) => handleUpdateStatus(selectedRequest.id, e.target.value)}
+                        className="bg-background border border-border px-3 py-2 rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary"
+                      >
+                        <option value="submitted">Submitted</option>
+                        <option value="under_review">Under Review</option>
+                        <option value="documents_verified">Documents Verified</option>
+                        <option value="scheduled">Scheduled</option>
+                        <option value="field_survey">Field Survey</option>
+                        <option value="completed">Completed</option>
+                        <option value="cancelled">Cancelled</option>
+                      </select>
+                      {isUpdating && <Loader2 className="size-5 animate-spin text-primary self-center" />}
+                    </div>
                   </div>
-                  <div className="flex gap-2">
-                    <select 
+
+                  {/* ONE-CLICK COMPLETE BUTTON */}
+                  {['scheduled', 'field_survey'].includes(selectedRequest.status) && (
+                    <button 
+                      onClick={() => handleUpdateStatus(selectedRequest.id, 'completed')}
                       disabled={isUpdating}
-                      value={selectedRequest.status}
-                      onChange={(e) => handleUpdateStatus(selectedRequest.id, e.target.value)}
-                      className="bg-background border border-border px-3 py-2 rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary"
+                      className="w-full flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-white p-3 rounded-xl font-bold transition-all shadow-sm"
                     >
-                      <option value="submitted">Submitted</option>
-                      <option value="under_review">Under Review</option>
-                      <option value="documents_verified">Documents Verified</option>
-                      <option value="scheduled">Scheduled</option>
-                      <option value="field_survey">Field Survey</option>
-                      <option value="completed">Completed</option>
-                      <option value="cancelled">Cancelled</option>
-                    </select>
-                    {isUpdating && <Loader2 className="size-5 animate-spin text-primary self-center" />}
-                  </div>
+                      <CheckCircle2 className="size-5" /> Mark Task as Completed
+                    </button>
+                  )}
                 </div>
+
+                {/* Scheduling Block - Auto-appears when payment is verified */}
+                {(selectedRequest.paymentStatus === 'paid' || ['documents_verified', 'scheduled', 'field_survey'].includes(selectedRequest.status)) && (
+                   <div className="border border-border p-4 rounded-xl space-y-4 bg-card mt-2">
+                      <h4 className="text-sm font-bold flex items-center gap-2">
+                         <CalendarIcon className="size-4 text-primary" /> Schedule Field Survey
+                      </h4>
+                      {selectedRequest.scheduledDate && (
+                         <div className="text-sm text-muted-foreground mb-2">
+                            Currently Scheduled: {formatDate(selectedRequest.scheduledDate)} at {selectedRequest.scheduledTime}
+                         </div>
+                      )}
+                      <div className="flex gap-4">
+                         <input 
+                            type="date" 
+                            value={scheduleDate}
+                            onChange={(e) => setScheduleDate(e.target.value)}
+                            className="flex-1 px-3 py-2 bg-input-background border border-border rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary"
+                         />
+                         <input 
+                            type="time" 
+                            value={scheduleTime}
+                            onChange={(e) => setScheduleTime(e.target.value)}
+                            className="flex-1 px-3 py-2 bg-input-background border border-border rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary"
+                         />
+                         <button 
+                            onClick={handleUpdateSchedule}
+                            disabled={!scheduleDate || !scheduleTime || isUpdating}
+                            className="px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium disabled:opacity-50"
+                         >
+                            Save Schedule
+                         </button>
+                      </div>
+                   </div>
+                )}
 
                 {/* Scheduling Block */}
                 {['documents_verified', 'scheduled', 'field_survey'].includes(selectedRequest.status) && (

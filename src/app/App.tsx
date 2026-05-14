@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { useAuth } from './context/AuthContext';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { fallbackRoleForEmail, isMissingFirestoreDatabase } from '../lib/firebaseErrors';
 import { Loader2 } from 'lucide-react';
 
 // Page Components (Ensure these paths match your folder structure)
@@ -43,23 +42,27 @@ export default function App() {
       }
 
       setRoleLoading(true);
+      
+      // Inline fallback logic to replace the deleted Codex file
+      // Automatically grants 'admin' to emails ending in @surveysync.com
+      const fallbackRole = currentUser.email?.endsWith('@surveysync.com') ? 'admin' : 'client';
+
       try {
-        // We look inside the 'users' collection for a document matching the UID
+        // Look inside the 'users' collection for a document matching the UID
         const userDocRef = doc(db, 'users', currentUser.uid);
         const userDoc = await getDoc(userDocRef);
 
         if (userDoc.exists()) {
           const data = userDoc.data();
-          setUserRole(data.role || fallbackRoleForEmail(currentUser.email)); // Sets 'admin' or 'client'
+          setUserRole(data.role || fallbackRole);
         } else {
-          // If the UID doesn't exist in Firestore, we default to client
-          setUserRole(fallbackRoleForEmail(currentUser.email));
+          // If the UID doesn't exist in Firestore, default based on email
+          setUserRole(fallbackRole);
         }
       } catch (error) {
-        if (!isMissingFirestoreDatabase(error)) {
-          console.error("Error fetching user role:", error);
-        }
-        setUserRole(fallbackRoleForEmail(currentUser.email)); // Default on error to prevent app crash
+        console.error("Error fetching user role:", error);
+        // Default on error to prevent app crash
+        setUserRole(fallbackRole); 
       } finally {
         setRoleLoading(false);
       }

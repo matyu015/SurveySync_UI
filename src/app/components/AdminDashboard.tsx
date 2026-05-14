@@ -892,13 +892,23 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                    </div>
                 )}
 
-                {/* Details Grid */}
+{/* Details Grid */}
                 <div className="grid grid-cols-2 gap-6">
                   <div className="space-y-4">
                     <h4 className="text-sm font-bold border-b border-border pb-1">Client Information</h4>
                     <div className="text-sm">
                       <div className="text-muted-foreground">Name</div>
                       <div className="font-medium">{selectedRequest.clientName}</div>
+                    </div>
+                    <div className="text-sm pt-2">
+                      <div className="text-muted-foreground mb-2">Payment Status</div>
+                      <span className={`px-3 py-1.5 rounded-md text-xs font-bold uppercase tracking-wider border ${
+                        selectedRequest.paymentStatus === 'paid' 
+                          ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20' 
+                          : 'bg-amber-500/10 text-amber-500 border-amber-500/20'
+                      }`}>
+                        {selectedRequest.paymentStatus === 'paid' ? 'Paid' : 'Unpaid'}
+                      </span>
                     </div>
                   </div>
 

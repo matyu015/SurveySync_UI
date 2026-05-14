@@ -182,16 +182,33 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
     }
   };
 
+  // --- NEW CANCEL FUNCTION ---
+  const handleCancelRequest = async (requestId: string) => {
+    if (!window.confirm("Are you sure you want to cancel this request? This will mark it as Cancelled in the database.")) return;
+    setIsUpdating(true);
+    try {
+      if (requestId.startsWith('local-')) {
+        updateLocalDoc('requests', requestId, { status: 'cancelled' });
+      } else {
+        await updateDoc(doc(db, 'requests', requestId), { status: 'cancelled' });
+      }
+      if (selectedRequest) setSelectedRequest({ ...selectedRequest, status: 'cancelled' });
+    } catch (error) {
+      console.error("Error cancelling request:", error);
+      alert("Failed to cancel request.");
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
   const handleVerifyPayment = async (paymentId: string, requestId: string) => {
     if (!window.confirm("Verify this payment as received? This will update the client's request status.")) return;
     try {
-      // 1. Mark payment document as paid
       if (paymentId.startsWith('local-')) {
         updateLocalDoc('payments', paymentId, { status: 'paid', paidAt: new Date().toISOString() });
       } else {
         await updateDoc(doc(db, 'payments', paymentId), { status: 'paid', paidAt: new Date().toISOString() });
       }
-      // 2. Mark the parent request as paid
       if (requestId) {
         if (requestId.startsWith('local-')) {
           updateLocalDoc('requests', requestId, { paymentStatus: 'paid' });
@@ -302,6 +319,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
       available: 'bg-success/10 text-success border-success/20',
       unavailable: 'bg-destructive/10 text-destructive border-destructive/20',
       booked: 'bg-blue-500/10 text-blue-500 border-blue-500/20',
+      cancelled: 'bg-red-500/10 text-red-500 border-red-500/20', // NEW CANCELLED COLOR
     };
     return colors[status] || 'bg-muted text-muted-foreground border-border';
   };
@@ -435,7 +453,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                 <div className="grid md:grid-cols-4 gap-4">
                   {[
                     { label: 'Total Requests', value: requests.length, icon: FileText, color: 'bg-blue-500' },
-                    { label: 'Pending Review', value: requests.filter(r => r.status === 'submitted').length, icon: Clock, color: 'bg-warning' },
+                    { label: 'Pending Review', value: requests.filter(r => r.status === 'under_review' || r.status === 'submitted').length, icon: Clock, color: 'bg-warning' },
                     { label: 'Upcoming Surveys', value: requests.filter(r => r.scheduledDate).length, icon: CalendarIcon, color: 'bg-purple-500' },
                     { label: 'Revenue', value: `₱${payments.filter(p => p.status === 'paid').reduce((sum, p) => sum + p.amount, 0).toLocaleString()}`, icon: DollarSign, color: 'bg-success' }
                   ].map(stat => (
@@ -519,7 +537,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                </div>
             )}
 
-            {/* --- CALENDAR TAB (NEW) --- */}
+            {/* --- CALENDAR TAB --- */}
             {activeTab === 'calendar' && (
                <div className="space-y-6">
                  <div className="grid xl:grid-cols-[1.4fr_0.8fr] gap-6">
@@ -705,7 +723,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                </div>
             )}
 
-            {/* --- PAYMENTS TAB (UPDATED) --- */}
+            {/* --- PAYMENTS TAB --- */}
             {activeTab === 'payments' && (
               <div className="space-y-6">
                 <div className="grid md:grid-cols-3 gap-4">
@@ -775,12 +793,10 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
               </div>
             )}
             
-            {/* Omitted static tabs (clients, repository, etc.) for brevity, they remain unchanged from the previous code block */}
-
           </div>
         </main>
 
-        {/* --- MANAGEMENT MODAL (UPDATED WITH SCHEDULING) --- */}
+        {/* --- MANAGEMENT MODAL --- */}
         {selectedRequest && (
           <div className="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center p-6">
             <div className="bg-card rounded-2xl border border-border max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
@@ -815,12 +831,13 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                       <option value="scheduled">Scheduled</option>
                       <option value="field_survey">Field Survey</option>
                       <option value="completed">Completed</option>
+                      <option value="cancelled">Cancelled</option>
                     </select>
                     {isUpdating && <Loader2 className="size-5 animate-spin text-primary self-center" />}
                   </div>
                 </div>
 
-                {/* Scheduling Block - Appears if status implies it's time to schedule */}
+                {/* Scheduling Block */}
                 {['documents_verified', 'scheduled', 'field_survey'].includes(selectedRequest.status) && (
                    <div className="border border-border p-4 rounded-xl space-y-4 bg-card">
                       <h4 className="text-sm font-bold flex items-center gap-2">
@@ -878,14 +895,22 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                   </div>
                 </div>
 
-                <div className="pt-6 border-t border-border flex justify-between">
-                   <button 
-                    onClick={() => handleDeleteRequest(selectedRequest.id)}
-                    className="flex items-center gap-2 text-destructive hover:bg-destructive/10 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-                   >
-                      <Trash2 className="size-4" /> Delete Request
-                   </button>
-                   <button onClick={() => setSelectedRequest(null)} className="px-6 py-2 bg-foreground text-background rounded-lg text-sm font-bold">
+                <div className="pt-6 border-t border-border flex justify-between items-center">
+                   <div className="flex gap-2">
+                     <button 
+                      onClick={() => handleDeleteRequest(selectedRequest.id)}
+                      className="flex items-center gap-2 text-destructive hover:bg-destructive/10 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+                     >
+                        <Trash2 className="size-4" /> Delete
+                     </button>
+                     <button 
+                      onClick={() => handleCancelRequest(selectedRequest.id)}
+                      className="flex items-center gap-2 text-red-500 hover:bg-red-500/10 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+                     >
+                        <XCircle className="size-4" /> Cancel Request
+                     </button>
+                   </div>
+                   <button onClick={() => setSelectedRequest(null)} className="px-6 py-2 bg-foreground text-background rounded-lg text-sm font-bold hover:opacity-90">
                       Close Panel
                    </button>
                 </div>

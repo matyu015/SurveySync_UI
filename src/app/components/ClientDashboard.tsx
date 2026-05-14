@@ -210,7 +210,7 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
         surveyType,
         location,
         notes,
-        status: 'submitted',
+        status: 'under_review',
         paymentStatus: 'pending',
         amount,
         submittedAt: new Date().toISOString(),

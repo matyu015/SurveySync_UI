@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Map, LayoutDashboard, FileText, Calendar as CalendarIcon, Users, FileCheck, CreditCard, BarChart3, Settings, LogOut, Moon, Sun, Search, Filter, Download, ChevronLeft, ChevronRight, CheckCircle2, XCircle, Clock, AlertCircle, TrendingUp, Loader2, Trash2, ExternalLink, Bell } from 'lucide-react';
+import { Map, LayoutDashboard, FileText, Calendar as CalendarIcon, Users, FileCheck, CreditCard, Database, BarChart3, Settings, LogOut, Moon, Sun, Search, Filter, Download, ChevronLeft, ChevronRight, CheckCircle2, XCircle, Clock, AlertCircle, TrendingUp, Loader2, Trash2, ExternalLink, Bell, Edit } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line } from 'recharts';
 import { useAuth } from '../context/AuthContext';
 import { SURVEY_TYPES, BARANGAYS, mockPayments, mockRequests, mockUsers } from '../data/mockData';
@@ -58,6 +58,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
   // Management Modal State
   const [selectedRequest, setSelectedRequest] = useState<any | null>(null);
   const [isUpdating, setIsUpdating] = useState(false);
+  const [isEditingSchedule, setIsEditingSchedule] = useState(false);
   
   // Schedule Form State
   const [scheduleDate, setScheduleDate] = useState('');
@@ -121,6 +122,15 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
       unsubAvailability();
     };
   }, []);
+
+  // Reset editing state when a new request is selected
+  useEffect(() => {
+    if (selectedRequest) {
+      setIsEditingSchedule(false);
+      setScheduleDate(selectedRequest.scheduledDate || '');
+      setScheduleTime(selectedRequest.scheduledTime || '');
+    }
+  }, [selectedRequest]);
 
   // --- NOTIFICATION LOGIC ---
   const pendingRequests = requests.filter(r => r.status === 'submitted' || r.status === 'under_review');
@@ -200,9 +210,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
           status: 'scheduled',
         });
       }
-      alert("Schedule updated successfully!");
-      setScheduleDate('');
-      setScheduleTime('');
+      setIsEditingSchedule(false);
     } catch (error) {
       console.error("Error updating schedule:", error);
     } finally {
@@ -808,7 +816,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                 <div className="grid md:grid-cols-3 gap-4">
                   {[
                     { label: 'Total Collected', value: `₱${payments.filter(p => p.status === 'paid').reduce((sum, p) => sum + p.amount, 0).toLocaleString()}`, icon: CheckCircle2, color: 'bg-success' },
-                    { label: 'Pending Verification', value: `₱${pendingPaymentList.reduce((sum, p) => sum + p.amount, 0).toLocaleString()}`, icon: Clock, color: 'bg-warning' },
+                    { label: 'Pending Verification', value: `₱${payments.filter(p => p.status === 'pending').reduce((sum, p) => sum + p.amount, 0).toLocaleString()}`, icon: Clock, color: 'bg-warning' },
                     { label: 'Total Transactions', value: payments.length, icon: CreditCard, color: 'bg-blue-500' }
                   ].map(stat => (
                     <div key={stat.label} className="bg-card p-6 rounded-xl border border-border">
@@ -891,7 +899,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
 
               <div className="p-8 space-y-6">
                 
-{/* Status Updater & Quick Actions */}
+                {/* Status Updater & Quick Actions */}
                 <div className="space-y-3">
                   <div className="bg-primary/5 border border-primary/20 p-4 rounded-xl flex items-center justify-between">
                     <div>
@@ -929,74 +937,80 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                   )}
                 </div>
 
-                {/* Scheduling Block - Auto-appears when payment is verified */}
+                {/* VISUAL SCHEDULING BLOCK */}
                 {(selectedRequest.paymentStatus === 'paid' || ['documents_verified', 'scheduled', 'field_survey'].includes(selectedRequest.status)) && (
-                   <div className="border border-border p-4 rounded-xl space-y-4 bg-card mt-2">
+                  <div className="border border-border p-4 rounded-xl bg-card">
+                    <div className="flex items-center justify-between mb-4">
                       <h4 className="text-sm font-bold flex items-center gap-2">
-                         <CalendarIcon className="size-4 text-primary" /> Schedule Field Survey
+                         <CalendarIcon className="size-4 text-primary" /> Field Survey Schedule
                       </h4>
-                      {selectedRequest.scheduledDate && (
-                         <div className="text-sm text-muted-foreground mb-2">
-                            Currently Scheduled: {formatDate(selectedRequest.scheduledDate)} at {selectedRequest.scheduledTime}
-                         </div>
-                      )}
-                      <div className="flex gap-4">
-                         <input 
-                            type="date" 
-                            value={scheduleDate}
-                            onChange={(e) => setScheduleDate(e.target.value)}
-                            className="flex-1 px-3 py-2 bg-input-background border border-border rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary"
-                         />
-                         <input 
-                            type="time" 
-                            value={scheduleTime}
-                            onChange={(e) => setScheduleTime(e.target.value)}
-                            className="flex-1 px-3 py-2 bg-input-background border border-border rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary"
-                         />
+                      {selectedRequest.scheduledDate && !isEditingSchedule && (
                          <button 
-                            onClick={handleUpdateSchedule}
-                            disabled={!scheduleDate || !scheduleTime || isUpdating}
-                            className="px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium disabled:opacity-50"
+                            onClick={() => setIsEditingSchedule(true)}
+                            className="text-xs text-primary font-medium hover:underline flex items-center gap-1"
                          >
-                            Save Schedule
+                           <Edit className="size-3" /> Edit Schedule
                          </button>
-                      </div>
-                   </div>
-                )}
+                      )}
+                    </div>
 
-                {/* Scheduling Block */}
-                {['documents_verified', 'scheduled', 'field_survey'].includes(selectedRequest.status) && (
-                   <div className="border border-border p-4 rounded-xl space-y-4 bg-card">
-                      <h4 className="text-sm font-bold flex items-center gap-2">
-                         <CalendarIcon className="size-4 text-primary" /> Schedule Field Survey
-                      </h4>
-                      {selectedRequest.scheduledDate && (
-                         <div className="text-sm text-muted-foreground mb-2">
-                            Currently Scheduled: {formatDate(selectedRequest.scheduledDate)} at {selectedRequest.scheduledTime}
-                         </div>
-                      )}
-                      <div className="flex gap-4">
-                         <input 
-                            type="date" 
-                            value={scheduleDate}
-                            onChange={(e) => setScheduleDate(e.target.value)}
-                            className="flex-1 px-3 py-2 bg-input-background border border-border rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary"
-                         />
-                         <input 
-                            type="time" 
-                            value={scheduleTime}
-                            onChange={(e) => setScheduleTime(e.target.value)}
-                            className="flex-1 px-3 py-2 bg-input-background border border-border rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary"
-                         />
-                         <button 
-                            onClick={handleUpdateSchedule}
-                            disabled={!scheduleDate || !scheduleTime || isUpdating}
-                            className="px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium disabled:opacity-50"
-                         >
-                            Save Schedule
-                         </button>
-                      </div>
-                   </div>
+                    {selectedRequest.scheduledDate && !isEditingSchedule ? (
+                       <div className="flex items-center gap-4 bg-muted/30 p-4 rounded-lg border border-border">
+                          {/* Calendar Tear-off Icon */}
+                          <div className="flex flex-col items-center justify-center bg-background border border-border shadow-sm rounded-lg min-w-[70px] overflow-hidden">
+                             <div className="bg-primary text-primary-foreground text-[10px] font-bold uppercase w-full text-center py-1">
+                                {new Date(selectedRequest.scheduledDate).toLocaleString('en-US', { month: 'short' })}
+                             </div>
+                             <div className="text-2xl font-bold py-1">
+                                {new Date(selectedRequest.scheduledDate).getDate()}
+                             </div>
+                          </div>
+                          {/* Details */}
+                          <div>
+                             <div className="font-bold text-foreground text-sm">
+                                {new Date(selectedRequest.scheduledDate).toLocaleString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+                             </div>
+                             <div className="text-sm text-muted-foreground flex items-center gap-1 mt-1">
+                                <Clock className="size-3.5" /> {selectedRequest.scheduledTime || 'Time TBA'}
+                             </div>
+                          </div>
+                       </div>
+                    ) : (
+                       <div className="space-y-4">
+                          <div className="flex gap-4">
+                             <input 
+                                type="date" 
+                                value={scheduleDate}
+                                onChange={(e) => setScheduleDate(e.target.value)}
+                                className="flex-1 px-3 py-2 bg-input-background border border-border rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary"
+                             />
+                             <input 
+                                type="time" 
+                                value={scheduleTime}
+                                onChange={(e) => setScheduleTime(e.target.value)}
+                                className="flex-1 px-3 py-2 bg-input-background border border-border rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary"
+                             />
+                          </div>
+                          <div className="flex gap-2">
+                             {selectedRequest.scheduledDate && isEditingSchedule && (
+                               <button 
+                                  onClick={() => setIsEditingSchedule(false)}
+                                  className="px-4 py-2 bg-accent hover:bg-accent/80 text-foreground rounded-lg text-sm font-medium transition-colors"
+                               >
+                                  Cancel
+                               </button>
+                             )}
+                             <button 
+                                onClick={handleUpdateSchedule}
+                                disabled={!scheduleDate || !scheduleTime || isUpdating}
+                                className="flex-1 px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium disabled:opacity-50 transition-all hover:opacity-90"
+                             >
+                                Save Schedule
+                             </button>
+                          </div>
+                       </div>
+                    )}
+                  </div>
                 )}
 
                 {/* Details Grid */}
@@ -1007,7 +1021,6 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                       <div className="text-muted-foreground">Name</div>
                       <div className="font-medium">{selectedRequest.clientName}</div>
                     </div>
-                    {/* Upgraded Payment Badge */}
                     <div className="text-sm pt-2">
                       <div className="text-muted-foreground mb-2">Payment Status</div>
                       <span className={`px-3 py-1.5 rounded-md text-xs font-bold uppercase tracking-wider border ${

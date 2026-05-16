@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { Map, LayoutDashboard, FileText, Calendar as CalendarIcon, Users, FileCheck, CreditCard, BarChart3, Settings, LogOut, Moon, Sun, Search, Filter, Download, ChevronLeft, ChevronRight, CheckCircle2, XCircle, X, Clock, AlertCircle, TrendingUp, Loader2, Trash2, ExternalLink, Bell, Edit, Menu } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { Map, LayoutDashboard, FileText, Calendar as CalendarIcon, Users, FileCheck, CreditCard, BarChart3, Settings, LogOut, Moon, Sun, Search, Filter, Download, ChevronLeft, ChevronRight, CheckCircle2, XCircle, X, Clock, AlertCircle, TrendingUp, Loader2, Trash2, ExternalLink, Bell, Edit, Menu, Upload } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line } from 'recharts';
 import { useAuth } from '../context/AuthContext';
 import { SURVEY_TYPES, BARANGAYS, mockPayments, mockRequests, mockUsers } from '../data/mockData';
@@ -7,6 +7,7 @@ import { collection, query, where, onSnapshot, updateDoc, doc, deleteDoc, addDoc
 import { getApp } from 'firebase/app';
 import { isMissingFirestoreDatabase } from '../../lib/firebaseErrors';
 import { addLocalDoc, deleteLocalDoc, getLocalCollection, mergeLocalDocuments, subscribeLocalCollection, updateLocalDoc } from '../../lib/localStore';
+import { supabase } from '../../lib/supabase';
 import MonthCalendar, { formatDateKey } from './MonthCalendar';
 
 const db = getFirestore(getApp());
@@ -54,6 +55,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
   const [clients, setClients] = useState<any[]>(mockUsers.filter(user => user.role === 'client'));
   const [payments, setPayments] = useState<any[]>(mockPayments);
   const [availabilitySlots, setAvailabilitySlots] = useState<any[]>([]);
+  const [documents, setDocuments] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [adminCalendarMonth, setAdminCalendarMonth] = useState(new Date());
 
@@ -74,6 +76,11 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
   const [availabilityStatus, setAvailabilityStatus] = useState<'available' | 'unavailable'>('available');
   const [availabilityNote, setAvailabilityNote] = useState('');
   const [isSavingAvailability, setIsSavingAvailability] = useState(false);
+
+  // Document Upload State
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isUploadingDoc, setIsUploadingDoc] = useState(false);
+  const [uploadDocRequestId, setUploadDocRequestId] = useState('');
 
   // Firestore Listeners
   useEffect(() => {
@@ -112,11 +119,19 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
       setAvailabilitySlots(getLocalCollection('availability'));
     });
 
+    // NEW: Listen for all documents
+    const unsubDocs = onSnapshot(collection(db, 'documents'), (snapshot) => {
+      setDocuments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, (error) => {
+      console.error("Error loading documents:", error);
+    });
+
     return () => {
       unsubRequests();
       unsubClients();
       unsubPayments();
       unsubAvailability();
+      unsubDocs();
     };
   }, []);
 
@@ -172,6 +187,75 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
       setActiveTab('payments');
     }
   };
+
+  // --- ADMIN FILE UPLOAD LOGIC ---
+  const handleAdminFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (!uploadDocRequestId) {
+      alert("Please select a specific survey request from the dropdown first.");
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      alert("File is too large. Maximum size is 5MB.");
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+
+    setIsUploadingDoc(true);
+    try {
+      const selectedReq = requests.find(r => r.id === uploadDocRequestId);
+      if (!selectedReq) throw new Error("Request not found");
+
+      const fileName = `admin_uploads/${Date.now()}_${file.name}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('documents')
+        .upload(fileName, file);
+
+      if (uploadError) throw uploadError;
+
+      const { data: publicUrlData } = supabase.storage
+        .from('documents')
+        .getPublicUrl(fileName);
+
+      await addDoc(collection(db, 'documents'), {
+        requestId: selectedReq.id,
+        requestRef: selectedReq.referenceNo,
+        clientId: selectedReq.clientId,
+        clientName: selectedReq.clientName,
+        uploadedBy: 'admin',
+        name: file.name,
+        fileUrl: publicUrlData.publicUrl,
+        status: 'verified', // Admin uploads are automatically verified
+        uploadedAt: new Date().toISOString(),
+        fileType: file.type,
+        fileSize: `${(file.size / (1024 * 1024)).toFixed(2)} MB`
+      });
+
+      alert("Official document uploaded successfully! The client can now see it in their Vault.");
+      setUploadDocRequestId('');
+    } catch (error) {
+      console.error("Upload failed:", error);
+      alert("Failed to upload document.");
+    } finally {
+      setIsUploadingDoc(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handleUpdateDocStatus = async (docId: string, newStatus: string) => {
+    try {
+      await updateDoc(doc(db, 'documents', docId), { status: newStatus });
+    } catch (error) {
+      console.error("Error updating document status:", error);
+      alert("Failed to update status.");
+    }
+  };
+
 
   // --- ACTIONS ---
   const handleUpdateStatus = async (requestId: string, newStatus: string) => {
@@ -350,6 +434,8 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
       unavailable: 'bg-destructive/10 text-destructive border-destructive/20',
       booked: 'bg-blue-500/10 text-blue-500 border-blue-500/20',
       cancelled: 'bg-red-500/10 text-red-500 border-red-500/20',
+      verified: 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20',
+      rejected: 'bg-red-500/10 text-red-500 border-red-500/20',
     };
     return colors[status] || 'bg-muted text-muted-foreground border-border';
   };
@@ -407,7 +493,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
           />
         )}
 
-        {/* RESPONSIVE SIDEBAR */}
+        {/* RESPONSIVE SIDEBAR: Fully visible on desktop, slides off-canvas on mobile */}
         <aside className={`
           fixed inset-y-0 left-0 z-50 bg-sidebar border-r border-sidebar-border flex flex-col transition-transform duration-300 w-64
           md:relative md:translate-x-0
@@ -422,6 +508,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                 SurveySync
               </h1>
             </div>
+            {/* Close button only visible on mobile inside the sidebar */}
             <button 
               onClick={() => setIsMobileMenuOpen(false)} 
               className="p-2 rounded-lg hover:bg-sidebar-accent md:hidden text-sidebar-foreground"
@@ -471,7 +558,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
               <button onClick={() => setIsMobileMenuOpen(true)} className="md:hidden p-2 -ml-2 rounded-lg hover:bg-accent text-foreground">
                 <Menu className="size-6" />
               </button>
-              <h2 className="text-xl sm:text-2xl font-semibold capitalize">{activeTab}</h2>
+              <h2 className="text-xl sm:text-2xl font-semibold capitalize">{activeTab.replace('_', ' ')}</h2>
             </div>
             
             <div className="flex items-center gap-2 sm:gap-4">
@@ -580,9 +667,12 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                               </span>
                             </td>
                             <td className="px-6 py-4">
-                              <button onClick={() => setSelectedRequest(request)} className="px-3 py-1.5 border border-border rounded-lg text-sm font-medium hover:bg-accent transition-colors">
+                              <button 
+                                onClick={() => setSelectedRequest(request)} 
+                                className="px-3 py-1.5 border border-border rounded-lg text-sm font-medium hover:bg-accent transition-colors"
+                              >
                                 Manage
-                                </button>
+                              </button>
                             </td>
                           </tr>
                         ))}
@@ -618,7 +708,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                                  <span className={`px-2 py-1 rounded text-xs border ${statusColor(request.status)}`}>{request.status.replace(/_/g, ' ')}</span>
                               </td>
                               <td className="px-6 py-4">
-                                 <button onClick={() => setSelectedRequest(request)} className="p-2 hover:bg-accent rounded-lg">
+                                 <button onClick={() => setSelectedRequest(request)} className="p-2 hover:bg-accent rounded-lg border border-border">
                                     <ExternalLink className="size-4" />
                                  </button>
                               </td>
@@ -627,6 +717,144 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                      </tbody>
                   </table>
                </div>
+            )}
+
+            {/* --- DOCUMENTS TAB (NEW) --- */}
+            {activeTab === 'documents' && (
+              <div className="space-y-6">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                  <div>
+                    <h2 className="text-2xl font-bold tracking-tight">Document Review</h2>
+                    <p className="text-sm text-muted-foreground">Manage client requirements and upload official survey results.</p>
+                  </div>
+                </div>
+
+                <div className="grid xl:grid-cols-[1fr_2fr] gap-6">
+                  {/* Admin Upload Section */}
+                  <div className="bg-card rounded-xl border border-border p-6 space-y-5 h-fit">
+                    <div>
+                      <h3 className="font-semibold">Upload Survey Result</h3>
+                      <p className="text-sm text-muted-foreground mt-1">Upload approved plans or final documents for a client's request.</p>
+                    </div>
+                    
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium mb-1.5">Select Request</label>
+                        <select
+                          value={uploadDocRequestId}
+                          onChange={(e) => setUploadDocRequestId(e.target.value)}
+                          className="w-full px-3 py-2 bg-input-background border border-border rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary"
+                        >
+                          <option value="">-- Select Scheduled/Completed Request --</option>
+                          {requests.filter(r => r.status === 'scheduled' || r.status === 'field_survey' || r.status === 'completed').map(r => (
+                            <option key={r.id} value={r.id}>
+                              {r.referenceNo} - {getClientName(r.clientId, r.clientName)}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <input
+                          type="file"
+                          ref={fileInputRef}
+                          onChange={handleAdminFileUpload}
+                          className="hidden"
+                          accept=".pdf,.jpg,.jpeg,.png"
+                        />
+                        <button
+                          onClick={() => fileInputRef.current?.click()}
+                          disabled={isUploadingDoc || !uploadDocRequestId}
+                          className="w-full h-32 bg-background rounded-xl border-2 border-dashed border-border flex flex-col items-center justify-center gap-2 hover:border-primary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {isUploadingDoc ? (
+                            <>
+                              <Loader2 className="size-6 text-primary animate-spin" />
+                              <span className="text-sm">Uploading securely...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Upload className="size-6 text-muted-foreground" />
+                              <span className="text-sm font-medium">Click to Upload File</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Documents Table */}
+                  <div className="bg-card rounded-xl border border-border overflow-hidden">
+                    <div className="p-5 border-b border-border flex justify-between items-center">
+                       <h3 className="font-semibold">All Documents</h3>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full min-w-[700px]">
+                        <thead className="bg-muted/50 text-xs text-muted-foreground uppercase">
+                          <tr>
+                            <th className="px-5 py-3 text-left">File Name</th>
+                            <th className="px-5 py-3 text-left">Uploaded By</th>
+                            <th className="px-5 py-3 text-left">Related Request</th>
+                            <th className="px-5 py-3 text-left">Date</th>
+                            <th className="px-5 py-3 text-left">Status</th>
+                            <th className="px-5 py-3 text-left">Action</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-border">
+                          {documents.sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime()).map(docItem => (
+                            <tr key={docItem.id} className="hover:bg-accent/30 transition-colors">
+                              <td className="px-5 py-4">
+                                <div className="flex items-center gap-3">
+                                  <FileText className="size-5 text-primary" />
+                                  <div className="font-medium text-sm truncate max-w-[150px] lg:max-w-[200px]" title={docItem.name}>{docItem.name}</div>
+                                </div>
+                              </td>
+                              <td className="px-5 py-4 text-sm">
+                                {docItem.uploadedBy === 'admin' ? (
+                                  <span className="text-primary font-bold">Admin</span>
+                                ) : (
+                                  getClientName(docItem.clientId, docItem.clientName)
+                                )}
+                              </td>
+                              <td className="px-5 py-4 text-sm text-muted-foreground">
+                                 {docItem.requestRef || 'General Vault'}
+                              </td>
+                              <td className="px-5 py-4 text-sm">{formatDate(docItem.uploadedAt)}</td>
+                              <td className="px-5 py-4">
+                                <select
+                                  value={docItem.status}
+                                  onChange={(e) => handleUpdateDocStatus(docItem.id, e.target.value)}
+                                  disabled={docItem.uploadedBy === 'admin'}
+                                  className={`text-xs px-2 py-1 rounded-full border outline-none font-medium ${statusColor(docItem.status)} ${docItem.uploadedBy === 'admin' ? 'appearance-none bg-transparent cursor-default' : 'cursor-pointer hover:opacity-80'}`}
+                                >
+                                  <option value="under_review">Under Review</option>
+                                  <option value="verified">Verified</option>
+                                  <option value="rejected">Rejected</option>
+                                </select>
+                              </td>
+                              <td className="px-5 py-4">
+                                <a 
+                                  href={docItem.fileUrl} 
+                                  target="_blank" 
+                                  rel="noopener noreferrer"
+                                  className="px-3 py-1.5 border border-border rounded-lg text-sm font-medium hover:bg-accent transition-colors inline-block whitespace-nowrap"
+                                >
+                                  View File
+                                </a>
+                              </td>
+                            </tr>
+                          ))}
+                          {documents.length === 0 && (
+                            <tr>
+                              <td colSpan={6} className="px-5 py-10 text-center text-muted-foreground">No documents uploaded yet.</td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              </div>
             )}
 
             {/* --- CALENDAR TAB --- */}

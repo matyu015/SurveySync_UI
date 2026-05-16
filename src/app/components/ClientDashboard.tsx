@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { LayoutDashboard, FileText, Calendar as CalendarIcon, LogOut, Search, Menu, Sun, Moon, Plus, Upload, Loader2, Map, X, CreditCard, Clock, CheckCircle2, Receipt, Wallet, Bell } from 'lucide-react';
+import { LayoutDashboard, FileText, Calendar as CalendarIcon, LogOut, Search, Menu, Sun, Moon, Plus, Upload, Loader2, Map, X, CreditCard, Clock, CheckCircle2, Receipt, Wallet, Bell, FileCheck } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { collection, query, where, onSnapshot, addDoc, updateDoc, doc } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
@@ -96,6 +96,7 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
       setRequests(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     });
 
+    // Listen for ALL documents belonging to this client (both their uploads AND admin uploads)
     const qDocs = query(collection(db, 'documents'), where('clientId', '==', currentUser.uid));
     const unsubscribeDocs = onSnapshot(qDocs, (snapshot) => {
       setUserDocs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
@@ -118,8 +119,13 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
     };
   }, [currentUser]);
 
+  // Separate client uploads from official admin results
+  const adminUploads = userDocs.filter(doc => doc.uploadedBy === 'admin');
+  const myUploads = userDocs.filter(doc => doc.uploadedBy !== 'admin');
+
   // --- CLIENT NOTIFICATION LOGIC ---
   const notificationItems = [
+    // 1. Scheduled Surveys
     ...requests.filter(r => r.scheduledDate && r.status !== 'completed' && r.status !== 'cancelled').map(r => ({
       id: `sched-${r.id}`,
       type: 'request',
@@ -128,6 +134,7 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
       date: r.createdAt || new Date().toISOString(), 
       ref: r.referenceNo || r.id
     })),
+    // 2. Verified Payments
     ...payments.filter(p => p.status === 'paid').map(p => ({
       id: `pay-${p.id}`,
       type: 'payment',
@@ -136,11 +143,21 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
       date: p.paidAt || p.createdAt || new Date().toISOString(),
       ref: p.referenceNo || p.id
     })),
+    // 3. Official Results Uploaded
+    ...adminUploads.map(doc => ({
+      id: `doc-${doc.id}`,
+      type: 'vault',
+      title: 'Official Result Uploaded',
+      desc: `Admin has uploaded a new document for your survey: ${doc.name}`,
+      date: doc.uploadedAt || new Date().toISOString(),
+      ref: doc.requestRef || 'Vault'
+    })),
+    // 4. Completed Surveys
     ...requests.filter(r => r.status === 'completed').map(r => ({
       id: `comp-${r.id}`,
       type: 'request',
       title: 'Survey Completed',
-      desc: `Your ${r.surveyType} has been completed by the surveyor.`,
+      desc: `Your ${r.surveyType} has been officially completed.`,
       date: r.createdAt || new Date().toISOString(),
       ref: r.referenceNo || r.id
     }))
@@ -152,6 +169,7 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
     setShowNotifications(false);
     if (item.type === 'request') setActiveTab('requests');
     else if (item.type === 'payment') setActiveTab('payments');
+    else if (item.type === 'vault') setActiveTab('vault');
   };
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -353,10 +371,11 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
 
   const statusColor = (status: string) => {
     switch(normalizeStatus(status)) {
-      case 'completed': case 'paid': return 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20';
+      case 'completed': case 'paid': case 'verified': return 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20';
       case 'scheduled': case 'field_survey': return 'bg-blue-500/10 text-blue-600 border-blue-500/20';
       case 'submitted': case 'pending': return 'bg-amber-500/10 text-amber-600 border-amber-500/20';
       case 'under_review': case 'partial': return 'bg-purple-500/10 text-purple-600 border-purple-500/20';
+      case 'rejected': return 'bg-red-500/10 text-red-600 border-red-500/20';
       default: return 'bg-gray-500/10 text-gray-600 border-gray-500/20';
     }
   };
@@ -372,7 +391,7 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
         />
       )}
 
-      {/* RESPONSIVE SIDEBAR: Fully visible on desktop, slides off-canvas on mobile */}
+      {/* RESPONSIVE SIDEBAR */}
       <aside className={`
         fixed inset-y-0 left-0 z-50 bg-card border-r border-border flex flex-col transition-transform duration-300 w-64
         md:relative md:translate-x-0
@@ -385,7 +404,6 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
              </div>
              <span className="font-bold text-lg tracking-tight bg-clip-text text-transparent bg-gradient-to-br from-foreground to-foreground/70">SurveySync</span>
            </div>
-          {/* Close button only visible on mobile inside the sidebar */}
           <button 
             onClick={() => setIsMobileMenuOpen(false)} 
             className="p-2 rounded-lg hover:bg-accent text-muted-foreground md:hidden"
@@ -429,9 +447,8 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
       <main className="flex-1 flex flex-col min-w-0">
         <header className="h-16 bg-card/50 backdrop-blur-sm border-b border-border flex items-center justify-between px-4 sm:px-6 sticky top-0 z-10">
           <div className="flex items-center gap-4 flex-1">
-            {/* Hamburger Menu - Only visible on mobile/minimized screens */}
-            <button onClick={() => setIsMobileMenuOpen(true)} className="md:hidden p-2 -ml-2 rounded-lg hover:bg-accent">
-              <Menu className="size-6 text-foreground" />
+            <button onClick={() => setIsMobileMenuOpen(true)} className="md:hidden p-2 -ml-2 rounded-lg hover:bg-accent text-foreground">
+              <Menu className="size-6" />
             </button>
             <div className="relative w-full max-w-md hidden lg:block">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
@@ -603,48 +620,70 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
               </div>
 
               <div className="grid gap-4">
-                {sortedRequests.map((request) => (
-                  <div key={request.id} className="bg-card border border-border rounded-xl p-5 shadow-sm">
-                    <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                      <div className="space-y-2">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <h3 className="font-semibold">{request.referenceNo || request.id}</h3>
-                          <span className={`px-2.5 py-1 rounded-full text-xs border ${statusColor(request.status)}`}>
-                            {normalizeStatus(request.status).replace(/_/g, ' ')}
-                          </span>
-                          <span className={`px-2.5 py-1 rounded-full text-xs border ${statusColor(request.paymentStatus)}`}>
-                            Payment {normalizeStatus(request.paymentStatus).replace(/_/g, ' ')}
-                          </span>
+                {sortedRequests.map((request) => {
+                  // Check if Admin has uploaded an official result for this specific request
+                  const officialResult = adminUploads.find(doc => doc.requestId === request.id);
+
+                  return (
+                    <div key={request.id} className="bg-card border border-border rounded-xl p-5 shadow-sm">
+                      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                        <div className="space-y-2">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h3 className="font-semibold">{request.referenceNo || request.id}</h3>
+                            <span className={`px-2.5 py-1 rounded-full text-xs border ${statusColor(request.status)}`}>
+                              {normalizeStatus(request.status).replace(/_/g, ' ')}
+                            </span>
+                            <span className={`px-2.5 py-1 rounded-full text-xs border ${statusColor(request.paymentStatus)}`}>
+                              Payment {normalizeStatus(request.paymentStatus).replace(/_/g, ' ')}
+                            </span>
+                          </div>
+                          <div className="text-sm text-muted-foreground">{request.surveyType}</div>
+                          <div className="text-sm flex items-center gap-2">
+                            <Map className="size-4 text-muted-foreground" />
+                            {request.location || request.propertyDetails?.address?.street || 'Bataan'}
+                          </div>
+                          <div className="text-xs text-muted-foreground">Submitted {formatDate(request.submittedAt || request.createdAt)}</div>
                         </div>
-                        <div className="text-sm text-muted-foreground">{request.surveyType}</div>
-                        <div className="text-sm flex items-center gap-2">
-                          <Map className="size-4 text-muted-foreground" />
-                          {request.location || request.propertyDetails?.address?.street || 'Bataan'}
+                        
+                        <div className="flex flex-col sm:flex-row lg:flex-col gap-2 lg:items-end">
+                          <div className="text-lg font-bold">{formatCurrency(request.amount)}</div>
+                          
+                          {/* SHOW OFFICIAL RESULT BUTTON IF ADMIN UPLOADED IT */}
+                          {officialResult && (
+                            <a
+                              href={officialResult.fileUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-emerald-500 text-white rounded-lg text-sm font-medium hover:bg-emerald-600 transition-colors w-full sm:w-auto shadow-sm"
+                            >
+                              <FileCheck className="size-4" />
+                              View Official Result
+                            </a>
+                          )}
+
+                          <button
+                            onClick={() => openSchedulePicker(request)}
+                            disabled={Boolean(request.scheduledDate)}
+                            className="inline-flex items-center justify-center gap-2 px-4 py-2 border border-border rounded-lg text-sm font-medium hover:bg-accent disabled:opacity-50 disabled:cursor-not-allowed w-full sm:w-auto"
+                          >
+                            <CalendarIcon className="size-4" />
+                            {request.scheduledDate ? 'Scheduled' : 'Pick Schedule'}
+                          </button>
+                          
+                          {/* Only show pay button if it's not paid yet */}
+                          {request.paymentStatus !== 'paid' && (
+                            <button
+                              onClick={() => openPaymentModal(request)}
+                              className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:opacity-90 w-full sm:w-auto"
+                            >
+                              <CreditCard className="size-4" /> Pay / Submit Proof
+                            </button>
+                          )}
                         </div>
-                        <div className="text-xs text-muted-foreground">Submitted {formatDate(request.submittedAt || request.createdAt)}</div>
-                      </div>
-                      <div className="flex flex-col sm:flex-row lg:flex-col gap-2 lg:items-end">
-                        <div className="text-lg font-bold">{formatCurrency(request.amount)}</div>
-                        <button
-                          onClick={() => openSchedulePicker(request)}
-                          disabled={Boolean(request.scheduledDate)}
-                          className="inline-flex items-center justify-center gap-2 px-4 py-2 border border-border rounded-lg text-sm font-medium hover:bg-accent disabled:opacity-50 disabled:cursor-not-allowed w-full sm:w-auto"
-                        >
-                          <CalendarIcon className="size-4" />
-                          {request.scheduledDate ? 'Scheduled' : 'Pick Schedule'}
-                        </button>
-                        <button
-                          onClick={() => openPaymentModal(request)}
-                          disabled={request.paymentStatus === 'paid'}
-                          className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed w-full sm:w-auto"
-                        >
-                          <CreditCard className="size-4" />
-                          {request.paymentStatus === 'paid' ? 'Paid' : 'Pay / Submit Proof'}
-                        </button>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
                 {sortedRequests.length === 0 && (
                   <div className="p-12 flex flex-col items-center justify-center text-center text-muted-foreground bg-card border border-border rounded-xl">
                     <Map className="size-12 mb-4 opacity-30" />
@@ -822,66 +861,110 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
             <div className="space-y-6">
               <div>
                 <h2 className="text-2xl font-bold tracking-tight mb-1">Document Vault</h2>
-                <p className="text-muted-foreground text-sm">Upload and manage your required survey documents.</p>
+                <p className="text-muted-foreground text-sm">Secure storage for your requirements and official survey results.</p>
               </div>
 
-              <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-                <div>
-                  <input
-                    type="file"
-                    ref={fileInputRef}
-                    onChange={handleFileUpload}
-                    className="hidden"
-                    accept=".pdf,.jpg,.jpeg,.png"
-                  />
-                  <button
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={isUploading}
-                    className="w-full h-full min-h-[200px] bg-card rounded-xl border-2 border-dashed border-border p-6 hover:border-primary transition-colors flex flex-col items-center justify-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
-                  >
-                    {isUploading ? (
-                      <>
-                        <Loader2 className="size-8 text-primary animate-spin" />
-                        <div className="text-sm text-muted-foreground">Uploading to Secure Vault...</div>
-                      </>
-                    ) : (
-                      <>
-                        <Upload className="size-8 text-muted-foreground" />
-                        <div className="text-sm font-medium">Upload New Document</div>
-                        <div className="text-xs text-muted-foreground opacity-70">PDF, JPG, PNG (Max 5MB)</div>
-                      </>
-                    )}
-                  </button>
-                </div>
+              {/* SEPARATE SECTION FOR ADMIN OFFICIAL RESULTS */}
+              {adminUploads.length > 0 && (
+                <div className="mb-8 border-b border-border pb-8">
+                  <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-emerald-600">
+                    <FileCheck className="size-5" /> Official Survey Results
+                  </h3>
+                  <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {adminUploads.map(doc => (
+                      <div key={doc.id} className="bg-emerald-500/5 rounded-xl border border-emerald-500/20 p-6 flex flex-col shadow-sm relative overflow-hidden">
+                        <div className="absolute top-0 left-0 w-1 h-full bg-emerald-500"></div>
+                        <div className="flex items-start justify-between mb-4">
+                          <div className="size-12 bg-emerald-500/10 rounded-lg flex items-center justify-center">
+                            <FileCheck className="size-6 text-emerald-600" />
+                          </div>
+                          <span className="px-2 py-1 rounded text-[10px] sm:text-xs font-bold border bg-emerald-500/10 text-emerald-600 border-emerald-500/20 uppercase tracking-wide">
+                            Official Result
+                          </span>
+                        </div>
+                        <h4 className="mb-1 font-bold text-emerald-900 dark:text-emerald-400 truncate" title={doc.name}>{doc.name}</h4>
+                        <p className="text-[10px] sm:text-xs text-muted-foreground mb-4">
+                          Request Ref: {doc.requestRef} <br/> Uploaded {formatDate(doc.uploadedAt)}
+                        </p>
 
-                {userDocs.map(doc => (
-                  <div key={doc.id} className="bg-card rounded-xl border border-border p-6 flex flex-col shadow-sm">
-                    <div className="flex items-start justify-between mb-4">
-                      <div className="size-12 bg-primary/10 rounded-lg flex items-center justify-center">
-                        <FileText className="size-6 text-primary" />
+                        <div className="mt-auto pt-4 border-t border-emerald-500/20 flex justify-end">
+                          <a
+                            href={doc.fileUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-sm text-white bg-emerald-500 hover:bg-emerald-600 px-4 py-2 rounded-lg font-medium transition-colors"
+                          >
+                            Download Result
+                          </a>
+                        </div>
                       </div>
-                      <span className={`px-2 py-1 rounded text-[10px] sm:text-xs font-medium border ${statusColor(doc.status)}`}>
-                        {doc.status.replace(/_/g, ' ')}
-                      </span>
-                    </div>
-                    <h4 className="mb-1 font-medium truncate" title={doc.name}>{doc.name}</h4>
-                    <p className="text-[10px] sm:text-xs text-muted-foreground mb-4">
-                      {doc.fileSize} - Uploaded {formatDate(doc.uploadedAt)}
-                    </p>
-
-                    <div className="mt-auto pt-4 border-t border-border flex justify-end">
-                      <a
-                        href={doc.fileUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-sm text-primary hover:underline font-medium"
-                      >
-                        View File
-                      </a>
-                    </div>
+                    ))}
                   </div>
-                ))}
+                </div>
+              )}
+
+              {/* REGULAR CLIENT UPLOADS */}
+              <div>
+                <h3 className="text-lg font-bold mb-4">My Uploaded Requirements</h3>
+                <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  <div>
+                    <input
+                      type="file"
+                      ref={fileInputRef}
+                      onChange={handleFileUpload}
+                      className="hidden"
+                      accept=".pdf,.jpg,.jpeg,.png"
+                    />
+                    <button
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={isUploading}
+                      className="w-full h-full min-h-[200px] bg-card rounded-xl border-2 border-dashed border-border p-6 hover:border-primary transition-colors flex flex-col items-center justify-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+                    >
+                      {isUploading ? (
+                        <>
+                          <Loader2 className="size-8 text-primary animate-spin" />
+                          <div className="text-sm text-muted-foreground">Uploading to Secure Vault...</div>
+                        </>
+                      ) : (
+                        <>
+                          <Upload className="size-8 text-muted-foreground" />
+                          <div className="text-sm font-medium">Upload Requirement</div>
+                          <div className="text-xs text-muted-foreground opacity-70">PDF, JPG, PNG (Max 5MB)</div>
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  {myUploads.map(doc => (
+                    <div key={doc.id} className="bg-card rounded-xl border border-border p-6 flex flex-col shadow-sm">
+                      <div className="flex items-start justify-between mb-4">
+                        <div className="size-12 bg-primary/10 rounded-lg flex items-center justify-center">
+                          <FileText className="size-6 text-primary" />
+                        </div>
+                        <span className={`px-2 py-1 rounded text-[10px] sm:text-xs font-medium border ${statusColor(doc.status)}`}>
+                          {doc.status.replace(/_/g, ' ')}
+                        </span>
+                      </div>
+                      <h4 className="mb-1 font-medium truncate" title={doc.name}>{doc.name}</h4>
+                      <p className="text-[10px] sm:text-xs text-muted-foreground mb-4">
+                        {doc.fileSize} - Uploaded {formatDate(doc.uploadedAt)}
+                      </p>
+
+                      <div className="mt-auto pt-4 border-t border-border flex justify-end">
+                        <a
+                          href={doc.fileUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-sm text-primary hover:underline font-medium"
+                        >
+                          View File
+                        </a>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
+
             </div>
           )}
         </div>

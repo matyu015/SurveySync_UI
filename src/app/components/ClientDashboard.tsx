@@ -1,25 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import {
-  LayoutDashboard,
-  FileText,
-  Calendar as CalendarIcon,
-  LogOut,
-  Search,
-  Menu,
-  Sun,
-  Moon,
-  Plus,
-  Upload,
-  Loader2,
-  Map,
-  X,
-  CreditCard,
-  Clock,
-  CheckCircle2,
-  Receipt,
-  Wallet,
-  Bell // <-- Added Bell icon
-} from 'lucide-react';
+import { LayoutDashboard, FileText, Calendar as CalendarIcon, LogOut, Search, Menu, Sun, Moon, Plus, Upload, Loader2, Map, X, CreditCard, Clock, CheckCircle2, Receipt, Wallet, Bell } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { collection, query, where, onSnapshot, addDoc, updateDoc, doc } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
@@ -60,11 +40,25 @@ function normalizeStatus(status?: string) {
   return (status || 'submitted').toLowerCase().replace(/\s+/g, '_');
 }
 
+// Custom SurveySync Logo
+const SurveySyncLogo = ({ className = "size-8" }) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <polygon points="12 3 22 8.5 22 15.5 12 21 2 15.5 2 8.5 12 3" className="text-primary fill-primary/10" />
+    <polyline points="2 8.5 12 14.5 22 8.5" className="text-primary" />
+    <line x1="12" y1="21" x2="12" y2="14.5" className="text-primary" />
+    <circle cx="12" cy="14.5" r="1.5" className="fill-primary text-primary" />
+    <circle cx="12" cy="3" r="1.5" className="fill-primary text-primary" />
+    <circle cx="2" cy="8.5" r="1.5" className="fill-primary text-primary" />
+    <circle cx="22" cy="8.5" r="1.5" className="fill-primary text-primary" />
+  </svg>
+);
+
 export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: ClientDashboardProps) {
   const { currentUser, logout } = useAuth();
 
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [clientCalendarMonth, setClientCalendarMonth] = useState(new Date());
   const [selectedCalendarDate, setSelectedCalendarDate] = useState('');
@@ -98,48 +92,23 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
   useEffect(() => {
     if (!currentUser) return;
 
-    // 1. Live Survey Requests
-    const qRequests = query(
-      collection(db, 'requests'),
-      where('clientId', '==', currentUser.uid)
-    );
+    const qRequests = query(collection(db, 'requests'), where('clientId', '==', currentUser.uid));
     const unsubscribeRequests = onSnapshot(qRequests, (snapshot) => {
-      const reqData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setRequests(reqData);
-    }, (error) => {
-      console.error("Error loading survey requests:", error);
+      setRequests(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     });
 
-    // 2. Live Documents
-    const qDocs = query(
-      collection(db, 'documents'),
-      where('clientId', '==', currentUser.uid)
-    );
+    const qDocs = query(collection(db, 'documents'), where('clientId', '==', currentUser.uid));
     const unsubscribeDocs = onSnapshot(qDocs, (snapshot) => {
-      const docData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setUserDocs(docData);
-    }, (error) => {
-      console.error("Error loading documents:", error);
+      setUserDocs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     });
 
-    // 3. Live Payments
-    const qPayments = query(
-      collection(db, 'payments'),
-      where('clientId', '==', currentUser.uid)
-    );
+    const qPayments = query(collection(db, 'payments'), where('clientId', '==', currentUser.uid));
     const unsubscribePayments = onSnapshot(qPayments, (snapshot) => {
-      const paymentData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setPayments(paymentData);
-    }, (error) => {
-      console.error("Error loading payments:", error);
+      setPayments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     });
 
-    // 4. Live Schedule Availability
     const unsubscribeAvailability = onSnapshot(collection(db, 'availability'), (snapshot) => {
-      const slotData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setAvailabilitySlots(slotData);
-    }, (error) => {
-      console.error("Error loading availability:", error);
+      setAvailabilitySlots(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     });
 
     return () => {
@@ -152,7 +121,6 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
 
   // --- CLIENT NOTIFICATION LOGIC ---
   const notificationItems = [
-    // 1. Scheduled Surveys
     ...requests.filter(r => r.scheduledDate && r.status !== 'completed' && r.status !== 'cancelled').map(r => ({
       id: `sched-${r.id}`,
       type: 'request',
@@ -161,7 +129,6 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
       date: r.createdAt || new Date().toISOString(), 
       ref: r.referenceNo || r.id
     })),
-    // 2. Verified Payments
     ...payments.filter(p => p.status === 'paid').map(p => ({
       id: `pay-${p.id}`,
       type: 'payment',
@@ -170,7 +137,6 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
       date: p.paidAt || p.createdAt || new Date().toISOString(),
       ref: p.referenceNo || p.id
     })),
-    // 3. Completed Surveys
     ...requests.filter(r => r.status === 'completed').map(r => ({
       id: `comp-${r.id}`,
       type: 'request',
@@ -185,11 +151,8 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
 
   const handleNotificationClick = (item: any) => {
     setShowNotifications(false);
-    if (item.type === 'request') {
-      setActiveTab('requests');
-    } else if (item.type === 'payment') {
-      setActiveTab('payments');
-    }
+    if (item.type === 'request') setActiveTab('requests');
+    else if (item.type === 'payment') setActiveTab('payments');
   };
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -204,16 +167,10 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
     setIsUploading(true);
     try {
       const fileName = `${currentUser.uid}/${Date.now()}_${file.name}`;
-
-      const { error: uploadError } = await supabase.storage
-        .from('documents')
-        .upload(fileName, file);
-
+      const { error: uploadError } = await supabase.storage.from('documents').upload(fileName, file);
       if (uploadError) throw uploadError;
 
-      const { data: publicUrlData } = supabase.storage
-        .from('documents')
-        .getPublicUrl(fileName);
+      const { data: publicUrlData } = supabase.storage.from('documents').getPublicUrl(fileName);
 
       await addDoc(collection(db, 'documents'), {
         clientId: currentUser.uid,
@@ -238,18 +195,13 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
 
   const handleSubmitRequest = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!currentUser) {
-      alert("Please log in to submit a request.");
-      return;
-    }
+    if (!currentUser) return alert("Please log in to submit a request.");
 
     setIsSubmitting(true);
-
     try {
       const amount = SURVEY_PRICES[surveyType] || 5500;
-      const referenceNo = makeReference('SS');
       const requestPayload = {
-        referenceNo,
+        referenceNo: makeReference('SS'),
         clientId: currentUser.uid,
         clientEmail: currentUser.email,
         clientName: currentUser.displayName || currentUser.email?.split('@')[0] || 'Client',
@@ -262,12 +214,7 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
         submittedAt: new Date().toISOString(),
         createdAt: new Date().toISOString(),
         propertyDetails: {
-          address: {
-            street: location,
-            barangay: '',
-            municipality: '',
-            province: 'Bataan',
-          },
+          address: { street: location, barangay: '', municipality: '', province: 'Bataan' },
           purpose: purpose || 'For survey processing',
         },
       };
@@ -282,8 +229,8 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
       setSelectedScheduleRequestId('');
       setActiveTab('requests');
     } catch (error) {
-      console.error("Error submitting request: ", error);
-      alert("Failed to submit request. Please check your internet connection.");
+      console.error("Error submitting request:", error);
+      alert("Failed to submit request.");
     } finally {
       setIsSubmitting(false);
     }
@@ -302,28 +249,20 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
   };
 
   const handleBookSchedule = async (slot: any) => {
-    if (!currentUser || !selectedScheduleRequestId) {
-      alert("Select a survey request before booking a schedule.");
-      return;
-    }
-
+    if (!currentUser || !selectedScheduleRequestId) return alert("Select a survey request first.");
     const selectedRequest = requests.find(request => request.id === selectedScheduleRequestId);
-    if (!selectedRequest) {
-      alert("Selected request was not found.");
-      return;
-    }
+    if (!selectedRequest) return;
 
     setIsBookingSchedule(true);
     try {
       const scheduledTime = slot.endTime ? `${slot.startTime} - ${slot.endTime}` : slot.startTime;
-      const requestScheduleUpdate = {
+      await updateDoc(doc(db, 'requests', selectedRequest.id), {
         scheduledDate: slot.date,
         scheduledTime,
         availabilitySlotId: slot.id,
         status: 'scheduled',
-      };
-
-      const slotBookingUpdate = {
+      });
+      await updateDoc(doc(db, 'availability', slot.id), {
         status: 'booked',
         bookedBy: currentUser.uid,
         clientEmail: currentUser.email,
@@ -331,15 +270,11 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
         requestId: selectedRequest.id,
         requestRef: selectedRequest.referenceNo || selectedRequest.id,
         bookedAt: new Date().toISOString(),
-      };
-
-      await updateDoc(doc(db, 'requests', selectedRequest.id), requestScheduleUpdate);
-      await updateDoc(doc(db, 'availability', slot.id), slotBookingUpdate);
-
+      });
       setSelectedScheduleRequestId('');
     } catch (error) {
       console.error("Schedule booking failed:", error);
-      alert("Failed to book this schedule. Please try another slot.");
+      alert("Failed to book this schedule.");
     } finally {
       setIsBookingSchedule(false);
     }
@@ -348,16 +283,12 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
   const handleSubmitPayment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser || !selectedPaymentRequest) return;
-
     const numericAmount = Number(paymentAmount);
-    if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
-      alert("Enter a valid payment amount.");
-      return;
-    }
+    if (!Number.isFinite(numericAmount) || numericAmount <= 0) return alert("Enter a valid payment amount.");
 
     setIsPaying(true);
     try {
-      const paymentPayload = {
+      await addDoc(collection(db, 'payments'), {
         requestId: selectedPaymentRequest.id,
         requestRef: selectedPaymentRequest.referenceNo || selectedPaymentRequest.id,
         clientId: currentUser.uid,
@@ -368,59 +299,31 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
         status: 'pending',
         referenceNo: paymentReference || makeReference(paymentMethod.toUpperCase()),
         createdAt: new Date().toISOString(),
-      };
-
-      const requestPaymentUpdate = { paymentStatus: 'partial' };
-
-      await addDoc(collection(db, 'payments'), paymentPayload);
-      await updateDoc(doc(db, 'requests', selectedPaymentRequest.id), requestPaymentUpdate);
-
+      });
+      await updateDoc(doc(db, 'requests', selectedPaymentRequest.id), { paymentStatus: 'partial' });
       setSelectedPaymentRequest(null);
       setActiveTab('payments');
     } catch (error) {
       console.error("Payment submission failed:", error);
-      alert("Failed to submit payment. Please check your internet connection.");
+      alert("Failed to submit payment.");
     } finally {
       setIsPaying(false);
     }
   };
 
   const handleLogout = async () => {
-    try {
-      await logout();
-      onLogout();
-    } catch (error) {
-      console.error("Failed to log out", error);
-    }
+    try { await logout(); onLogout(); } catch (error) { console.error("Failed to log out"); }
   };
 
   const filteredRequests = requests.filter(request => {
-    const haystack = [
-      request.referenceNo,
-      request.surveyType,
-      request.location,
-      request.status,
-      request.paymentStatus,
-    ].join(' ').toLowerCase();
+    const haystack = [request.referenceNo, request.surveyType, request.location, request.status, request.paymentStatus].join(' ').toLowerCase();
     return haystack.includes(searchQuery.toLowerCase());
   });
 
-  const sortedRequests = [...filteredRequests].sort((a, b) => {
-    return new Date(b.submittedAt || b.createdAt || 0).getTime() - new Date(a.submittedAt || a.createdAt || 0).getTime();
-  });
-
-  const scheduledRequests = [...requests]
-    .filter(request => request.scheduledDate)
-    .sort((a, b) => new Date(a.scheduledDate).getTime() - new Date(b.scheduledDate).getTime());
-
-  const schedulableRequests = [...requests]
-    .filter(request => !request.scheduledDate && normalizeStatus(request.status) !== 'completed')
-    .sort((a, b) => new Date(b.submittedAt || b.createdAt || 0).getTime() - new Date(a.submittedAt || a.createdAt || 0).getTime());
-
-  const availableSlots = [...availabilitySlots]
-    .filter(slot => slot.status === 'available')
-    .sort((a, b) => `${a.date || ''}T${a.startTime || '00:00'}`.localeCompare(`${b.date || ''}T${b.startTime || '00:00'}`));
-
+  const sortedRequests = [...filteredRequests].sort((a, b) => new Date(b.submittedAt || b.createdAt || 0).getTime() - new Date(a.submittedAt || a.createdAt || 0).getTime());
+  const scheduledRequests = [...requests].filter(r => r.scheduledDate).sort((a, b) => new Date(a.scheduledDate).getTime() - new Date(b.scheduledDate).getTime());
+  const schedulableRequests = [...requests].filter(r => !r.scheduledDate && normalizeStatus(r.status) !== 'completed').sort((a, b) => new Date(b.submittedAt || b.createdAt || 0).getTime() - new Date(a.submittedAt || a.createdAt || 0).getTime());
+  const availableSlots = [...availabilitySlots].filter(slot => slot.status === 'available').sort((a, b) => `${a.date || ''}T${a.startTime || '00:00'}`.localeCompare(`${b.date || ''}T${b.startTime || '00:00'}`));
   const selectedDateAvailableSlots = availableSlots.filter(slot => slot.date === selectedCalendarDate);
 
   const getClientDayState = (dateKey: string) => {
@@ -430,77 +333,77 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
     const unavailableCount = slots.filter(slot => slot.status === 'unavailable').length;
     const bookedCount = slots.filter(slot => slot.status === 'booked').length;
 
-    if (scheduledCount) {
-      return { status: 'scheduled' as const, label: `${scheduledCount} scheduled` };
-    }
-    if (availableCount) {
-      return { status: 'available' as const, label: `${availableCount} open` };
-    }
-    if (unavailableCount && !bookedCount) {
-      return { status: 'unavailable' as const, label: 'Unavailable' };
-    }
-    if (bookedCount) {
-      return { status: 'booked' as const, label: 'Booked' };
-    }
+    if (scheduledCount) return { status: 'scheduled' as const, label: `${scheduledCount} scheduled` };
+    if (availableCount) return { status: 'available' as const, label: `${availableCount} open` };
+    if (unavailableCount && !bookedCount) return { status: 'unavailable' as const, label: 'Unavailable' };
+    if (bookedCount) return { status: 'booked' as const, label: 'Booked' };
     return undefined;
   };
 
   const pendingPayments = requests.filter(request => request.paymentStatus !== 'paid');
   const verifiedPayments = payments.filter(payment => payment.status === 'paid');
-  const pendingPaymentAmount = payments
-    .filter(payment => payment.status === 'pending')
-    .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+  const pendingPaymentAmount = payments.filter(payment => payment.status === 'pending').reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
 
   const formatDate = (dateValue: any) => {
     if (!dateValue) return 'N/A';
     if (dateValue.toDate) return dateValue.toDate().toLocaleDateString();
-    return new Date(dateValue).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric'
-    });
+    return new Date(dateValue).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
   };
-
-  const formatCurrency = (amount: number | string | undefined) => {
-    const value = Number(amount || 0);
-    return `PHP ${value.toLocaleString()}`;
-  };
-
-  const formatSlotTime = (slot: any) => {
-    if (!slot?.startTime) return 'Time TBA';
-    return slot.endTime ? `${slot.startTime} - ${slot.endTime}` : slot.startTime;
-  };
+  const formatCurrency = (amount: number | string | undefined) => `PHP ${Number(amount || 0).toLocaleString()}`;
+  const formatSlotTime = (slot: any) => !slot?.startTime ? 'Time TBA' : slot.endTime ? `${slot.startTime} - ${slot.endTime}` : slot.startTime;
 
   const statusColor = (status: string) => {
     switch(normalizeStatus(status)) {
-      case 'completed':
-      case 'paid':
-        return 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20';
-      case 'scheduled':
-      case 'field_survey':
-        return 'bg-blue-500/10 text-blue-600 border-blue-500/20';
-      case 'submitted':
-      case 'pending':
-        return 'bg-amber-500/10 text-amber-600 border-amber-500/20';
-      case 'under_review':
-      case 'partial':
-        return 'bg-purple-500/10 text-purple-600 border-purple-500/20';
-      default:
-        return 'bg-gray-500/10 text-gray-600 border-gray-500/20';
+      case 'completed': case 'paid': return 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20';
+      case 'scheduled': case 'field_survey': return 'bg-blue-500/10 text-blue-600 border-blue-500/20';
+      case 'submitted': case 'pending': return 'bg-amber-500/10 text-amber-600 border-amber-500/20';
+      case 'under_review': case 'partial': return 'bg-purple-500/10 text-purple-600 border-purple-500/20';
+      default: return 'bg-gray-500/10 text-gray-600 border-gray-500/20';
     }
   };
 
   return (
     <div className="min-h-screen flex bg-background text-foreground transition-colors duration-300">
-      <aside className={`${sidebarCollapsed ? 'w-20' : 'w-64'} bg-card border-r border-border transition-all duration-300 flex-col hidden md:flex`}>
+      
+      {/* MOBILE OVERLAY */}
+      {isMobileMenuOpen && (
+        <div 
+          className="fixed inset-0 bg-background/80 backdrop-blur-sm z-40 md:hidden"
+          onClick={() => setIsMobileMenuOpen(false)}
+        />
+      )}
+
+      {/* RESPONSIVE SIDEBAR */}
+      <aside className={`
+        fixed inset-y-0 left-0 z-50 bg-card border-r border-border flex flex-col transition-all duration-300
+        md:relative md:translate-x-0
+        ${isMobileMenuOpen ? 'translate-x-0 w-64 shadow-2xl' : '-translate-x-full md:w-64'}
+        ${sidebarCollapsed && !isMobileMenuOpen ? 'md:w-20' : 'md:w-64'}
+      `}>
         <div className="h-16 flex items-center justify-between px-4 border-b border-border">
-          {!sidebarCollapsed && <span className="font-bold text-lg tracking-tight">SurveySync</span>}
-          <button onClick={() => setSidebarCollapsed(!sidebarCollapsed)} className="p-2 rounded-lg hover:bg-accent text-muted-foreground">
+          {(!sidebarCollapsed || isMobileMenuOpen) && (
+             <div className="flex items-center gap-3">
+               <div className="size-8 bg-primary/10 border border-primary/20 rounded-lg flex items-center justify-center shadow-sm">
+                 <SurveySyncLogo className="size-5 text-primary" />
+               </div>
+               <span className="font-bold text-lg tracking-tight bg-clip-text text-transparent bg-gradient-to-br from-foreground to-foreground/70">SurveySync</span>
+             </div>
+          )}
+          <button 
+            onClick={() => isMobileMenuOpen ? setIsMobileMenuOpen(false) : setSidebarCollapsed(!sidebarCollapsed)} 
+            className="p-2 rounded-lg hover:bg-accent text-muted-foreground hidden md:block"
+          >
             <Menu className="size-5" />
+          </button>
+          <button 
+            onClick={() => setIsMobileMenuOpen(false)} 
+            className="p-2 rounded-lg hover:bg-accent text-muted-foreground md:hidden"
+          >
+            <X className="size-5" />
           </button>
         </div>
 
-        <nav className="flex-1 py-6 px-3 space-y-2">
+        <nav className="flex-1 py-6 px-3 space-y-2 overflow-y-auto">
           {[
             { id: 'dashboard', icon: LayoutDashboard, label: 'Overview' },
             { id: 'requests', icon: Map, label: 'My Surveys' },
@@ -510,30 +413,33 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
           ].map((item) => (
             <button
               key={item.id}
-              onClick={() => setActiveTab(item.id as Tab)}
+              onClick={() => {
+                setActiveTab(item.id as Tab);
+                setIsMobileMenuOpen(false);
+              }}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all ${
                 activeTab === item.id ? 'bg-primary text-primary-foreground shadow-sm' : 'hover:bg-accent text-muted-foreground hover:text-foreground'
               }`}
             >
-              <item.icon className="size-5" />
-              {!sidebarCollapsed && <span className="font-medium">{item.label}</span>}
+              <item.icon className="size-5 flex-shrink-0" />
+              {(!sidebarCollapsed || isMobileMenuOpen) && <span className="font-medium whitespace-nowrap">{item.label}</span>}
             </button>
           ))}
         </nav>
 
         <div className="p-4 border-t border-border">
           <button onClick={handleLogout} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-destructive/10 text-destructive transition-colors">
-            <LogOut className="size-5" />
-            {!sidebarCollapsed && <span className="font-medium">Sign Out</span>}
+            <LogOut className="size-5 flex-shrink-0" />
+            {(!sidebarCollapsed || isMobileMenuOpen) && <span className="font-medium whitespace-nowrap">Sign Out</span>}
           </button>
         </div>
       </aside>
 
       <main className="flex-1 flex flex-col min-w-0">
-        <header className="h-16 bg-card/50 backdrop-blur-sm border-b border-border flex items-center justify-between px-6 sticky top-0 z-10">
+        <header className="h-16 bg-card/50 backdrop-blur-sm border-b border-border flex items-center justify-between px-4 sm:px-6 sticky top-0 z-10">
           <div className="flex items-center gap-4 flex-1">
-            <button className="md:hidden p-2 rounded-lg hover:bg-accent">
-              <Menu className="size-5" />
+            <button onClick={() => setIsMobileMenuOpen(true)} className="md:hidden p-2 -ml-2 rounded-lg hover:bg-accent">
+              <Menu className="size-6 text-foreground" />
             </button>
             <div className="relative w-full max-w-md hidden md:block">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
@@ -547,7 +453,7 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
             </div>
           </div>
 
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 sm:gap-4">
             
             {/* --- CLIENT NOTIFICATION BELL --- */}
             <div className="relative">
@@ -563,9 +469,8 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
                 )}
               </button>
 
-              {/* Dropdown Menu */}
               {showNotifications && (
-                <div className="absolute right-0 mt-3 w-80 bg-card border border-border rounded-xl shadow-2xl z-50 overflow-hidden">
+                <div className="absolute right-0 mt-3 w-80 max-w-[90vw] bg-card border border-border rounded-xl shadow-2xl z-50 overflow-hidden">
                   <div className="p-3 border-b border-border bg-muted/30 font-semibold flex justify-between items-center">
                     Notifications
                     <span className="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full">{totalNotifications} updates</span>
@@ -593,7 +498,7 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
               )}
             </div>
 
-            <button onClick={toggleDarkMode} className="p-2 rounded-full hover:bg-accent text-muted-foreground transition-colors">
+            <button onClick={toggleDarkMode} className="p-2 rounded-full hover:bg-accent text-muted-foreground transition-colors hidden sm:block">
               {darkMode ? <Sun className="size-5" /> : <Moon className="size-5" />}
             </button>
             <div className="size-9 rounded-full bg-primary/20 flex items-center justify-center text-primary font-bold border border-primary/30">
@@ -602,7 +507,7 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
           </div>
         </header>
 
-        <div className="p-6 overflow-auto relative">
+        <div className="p-4 sm:p-6 overflow-auto relative">
           {activeTab === 'dashboard' && (
             <div className="space-y-6">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
@@ -618,20 +523,20 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
                 </button>
               </div>
 
-              <div className="grid md:grid-cols-4 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 {[
                   { label: 'Survey Requests', value: requests.length, icon: Map, color: 'text-blue-500', bg: 'bg-blue-500/10' },
                   { label: 'Scheduled Visits', value: scheduledRequests.length, icon: CalendarIcon, color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
                   { label: 'Pending Payments', value: formatCurrency(pendingPaymentAmount), icon: Wallet, color: 'text-amber-500', bg: 'bg-amber-500/10' },
                   { label: 'Verified Payments', value: verifiedPayments.length, icon: CheckCircle2, color: 'text-purple-500', bg: 'bg-purple-500/10' },
                 ].map(stat => (
-                  <div key={stat.label} className="bg-card p-5 rounded-xl border border-border shadow-sm flex items-center gap-4">
-                    <div className={`size-11 rounded-lg ${stat.bg} flex items-center justify-center`}>
+                  <div key={stat.label} className="bg-card p-4 sm:p-5 rounded-xl border border-border shadow-sm flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
+                    <div className={`size-10 sm:size-11 rounded-lg ${stat.bg} flex items-center justify-center`}>
                       <stat.icon className={`size-5 ${stat.color}`} />
                     </div>
                     <div>
-                      <p className="text-xs font-medium text-muted-foreground">{stat.label}</p>
-                      <h3 className="text-xl font-bold">{stat.value}</h3>
+                      <p className="text-[10px] sm:text-xs font-medium text-muted-foreground">{stat.label}</p>
+                      <h3 className="text-lg sm:text-xl font-bold">{stat.value}</h3>
                     </div>
                   </div>
                 ))}
@@ -650,7 +555,7 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
                           <div className="font-medium">{request.referenceNo || request.id}</div>
                           <div className="text-sm text-muted-foreground">{request.surveyType} - {request.location || request.propertyDetails?.address?.street || 'Bataan'}</div>
                         </div>
-                        <span className={`px-2.5 py-1 rounded-full text-xs border ${statusColor(request.status)}`}>
+                        <span className={`px-2.5 py-1 rounded-full text-[10px] sm:text-xs border ${statusColor(request.status)}`}>
                           {normalizeStatus(request.status).replace(/_/g, ' ')}
                         </span>
                       </div>
@@ -731,7 +636,7 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
                         <button
                           onClick={() => openSchedulePicker(request)}
                           disabled={Boolean(request.scheduledDate)}
-                          className="inline-flex items-center justify-center gap-2 px-4 py-2 border border-border rounded-lg text-sm font-medium hover:bg-accent disabled:opacity-50 disabled:cursor-not-allowed"
+                          className="inline-flex items-center justify-center gap-2 px-4 py-2 border border-border rounded-lg text-sm font-medium hover:bg-accent disabled:opacity-50 disabled:cursor-not-allowed w-full sm:w-auto"
                         >
                           <CalendarIcon className="size-4" />
                           {request.scheduledDate ? 'Scheduled' : 'Pick Schedule'}
@@ -739,7 +644,7 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
                         <button
                           onClick={() => openPaymentModal(request)}
                           disabled={request.paymentStatus === 'paid'}
-                          className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                          className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed w-full sm:w-auto"
                         >
                           <CreditCard className="size-4" />
                           {request.paymentStatus === 'paid' ? 'Paid' : 'Pay / Submit Proof'}
@@ -814,7 +719,7 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
                           {selectedCalendarDate ? formatDate(selectedCalendarDate) : 'Pick a day on the month view.'}
                         </p>
                       </div>
-                      <span className="text-sm text-muted-foreground">{availableSlots.length} open this month</span>
+                      <span className="text-sm text-muted-foreground hidden sm:block">{availableSlots.length} open this month</span>
                     </div>
                     <div className="divide-y divide-border">
                       {selectedDateAvailableSlots.map(slot => (
@@ -865,26 +770,26 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
                 </button>
               </div>
 
-              <div className="grid md:grid-cols-3 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                 {[
                   { label: 'Transactions', value: payments.length, icon: Receipt, color: 'text-blue-500', bg: 'bg-blue-500/10' },
                   { label: 'Pending Verification', value: payments.filter(payment => payment.status === 'pending').length, icon: Clock, color: 'text-amber-500', bg: 'bg-amber-500/10' },
                   { label: 'Verified', value: verifiedPayments.length, icon: CheckCircle2, color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
                 ].map(stat => (
-                  <div key={stat.label} className="bg-card border border-border p-5 rounded-xl flex items-center gap-4">
-                    <div className={`size-11 rounded-lg ${stat.bg} flex items-center justify-center`}>
+                  <div key={stat.label} className="bg-card border border-border p-4 sm:p-5 rounded-xl flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
+                    <div className={`size-10 sm:size-11 rounded-lg ${stat.bg} flex items-center justify-center`}>
                       <stat.icon className={`size-5 ${stat.color}`} />
                     </div>
                     <div>
-                      <p className="text-xs text-muted-foreground">{stat.label}</p>
-                      <div className="text-xl font-bold">{stat.value}</div>
+                      <p className="text-[10px] sm:text-xs text-muted-foreground">{stat.label}</p>
+                      <div className="text-lg sm:text-xl font-bold">{stat.value}</div>
                     </div>
                   </div>
                 ))}
               </div>
 
-              <div className="bg-card border border-border rounded-xl overflow-hidden">
-                <table className="w-full text-left text-sm">
+              <div className="bg-card border border-border rounded-xl overflow-hidden overflow-x-auto">
+                <table className="w-full text-left text-sm min-w-[700px]">
                   <thead className="bg-accent/50 text-muted-foreground">
                     <tr>
                       <th className="px-5 py-3 font-medium">Reference</th>
@@ -904,7 +809,7 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
                         <td className="px-5 py-4">{formatCurrency(payment.amount)}</td>
                         <td className="px-5 py-4 text-muted-foreground">{formatDate(payment.createdAt)}</td>
                         <td className="px-5 py-4">
-                          <span className={`px-2.5 py-1 rounded-full text-xs border ${statusColor(payment.status)}`}>
+                          <span className={`px-2.5 py-1 rounded-full text-[10px] sm:text-xs border ${statusColor(payment.status)}`}>
                             {payment.status}
                           </span>
                         </td>
@@ -963,12 +868,12 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
                       <div className="size-12 bg-primary/10 rounded-lg flex items-center justify-center">
                         <FileText className="size-6 text-primary" />
                       </div>
-                      <span className={`px-2 py-1 rounded text-xs font-medium border ${statusColor(doc.status)}`}>
+                      <span className={`px-2 py-1 rounded text-[10px] sm:text-xs font-medium border ${statusColor(doc.status)}`}>
                         {doc.status.replace(/_/g, ' ')}
                       </span>
                     </div>
                     <h4 className="mb-1 font-medium truncate" title={doc.name}>{doc.name}</h4>
-                    <p className="text-xs text-muted-foreground mb-4">
+                    <p className="text-[10px] sm:text-xs text-muted-foreground mb-4">
                       {doc.fileSize} - Uploaded {formatDate(doc.uploadedAt)}
                     </p>
 
@@ -990,11 +895,12 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
         </div>
       </main>
 
+      {/* --- NEW REQUEST MODAL --- */}
       {isRequestModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm">
-          <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-xl overflow-hidden">
-            <div className="flex items-center justify-between p-6 border-b border-border">
-              <h2 className="text-xl font-bold flex items-center gap-2">
+          <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-xl overflow-hidden max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between p-4 sm:p-6 border-b border-border">
+              <h2 className="text-lg sm:text-xl font-bold flex items-center gap-2">
                 <Map className="size-5 text-primary" />
                 New Survey Request
               </h2>
@@ -1006,7 +912,7 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
               </button>
             </div>
 
-            <form onSubmit={handleSubmitRequest} className="p-6 space-y-5">
+            <form onSubmit={handleSubmitRequest} className="p-4 sm:p-6 space-y-4 sm:space-y-5 overflow-y-auto">
               <div>
                 <label className="block text-sm font-medium mb-1.5">Type of Survey</label>
                 <select
@@ -1056,7 +962,7 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
                 />
               </div>
 
-              <div className="pt-4 flex gap-3">
+              <div className="pt-2 sm:pt-4 flex gap-3">
                 <button
                   type="button"
                   onClick={() => setIsRequestModalOpen(false)}
@@ -1084,12 +990,13 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
         </div>
       )}
 
+      {/* --- PAYMENT MODAL --- */}
       {selectedPaymentRequest && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm">
-          <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-xl overflow-hidden">
-            <div className="flex items-center justify-between p-6 border-b border-border">
+          <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-xl overflow-hidden max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between p-4 sm:p-6 border-b border-border">
               <div>
-                <h2 className="text-xl font-bold flex items-center gap-2">
+                <h2 className="text-lg sm:text-xl font-bold flex items-center gap-2">
                   <CreditCard className="size-5 text-primary" />
                   Submit Payment
                 </h2>
@@ -1103,75 +1010,76 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
               </button>
             </div>
 
-            <form onSubmit={handleSubmitPayment} className="p-6 space-y-5">
+            <form onSubmit={handleSubmitPayment} className="p-4 sm:p-6 space-y-4 sm:space-y-5 overflow-y-auto">
               <div>
                 <label className="block text-sm font-medium mb-1.5">Mode of Payment</label>
-                <div className="grid sm:grid-cols-2 gap-4">
-                  {/* 1. GCash Button */}
+                <div className="grid sm:grid-cols-2 gap-3 sm:gap-4">
+                  
+                  {/* GCash */}
                   <button 
                     type="button"
                     onClick={() => setPaymentMethod('gcash')} 
-                    className={`p-4 rounded-xl border text-left transition-all ${paymentMethod === 'gcash' ? 'border-primary bg-primary/5 ring-1 ring-primary' : 'border-border hover:bg-accent'}`}
+                    className={`p-3 sm:p-4 rounded-xl border text-left transition-all ${paymentMethod === 'gcash' ? 'border-primary bg-primary/5 ring-1 ring-primary' : 'border-border hover:bg-accent'}`}
                   >
                     <div className="flex items-center gap-2 mb-1">
-                      <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <svg className="h-5 w-5 sm:h-6 sm:w-6" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                         <rect width="24" height="24" rx="6" fill="#007DFE"/>
                         <path d="M15 12h-3v2h1.5a2.5 2.5 0 0 1-3 1.5 2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 2 .9l1.5-1.4A4.5 4.5 0 1 0 12 16.5a4.5 4.5 0 0 0 4.5-4.5V12z" fill="white"/>
                       </svg>
-                      <span className="font-bold text-[#007DFE] tracking-wide">GCash</span>
+                      <span className="font-bold text-[#007DFE] tracking-wide text-sm sm:text-base">GCash</span>
                     </div>
-                    <div className="text-xs text-muted-foreground mt-1">Mobile wallet transfer</div>
+                    <div className="text-[10px] sm:text-xs text-muted-foreground mt-1">Mobile wallet transfer</div>
                   </button>
 
-                  {/* 2. Bank Transfer Button */}
+                  {/* Bank Transfer */}
                   <button 
                     type="button"
                     onClick={() => setPaymentMethod('bank')} 
-                    className={`p-4 rounded-xl border text-left transition-all ${paymentMethod === 'bank' ? 'border-primary bg-primary/5 ring-1 ring-primary' : 'border-border hover:bg-accent'}`}
+                    className={`p-3 sm:p-4 rounded-xl border text-left transition-all ${paymentMethod === 'bank' ? 'border-primary bg-primary/5 ring-1 ring-primary' : 'border-border hover:bg-accent'}`}
                   >
                     <div className="flex items-center gap-2 mb-1">
                       <div className="bg-indigo-100 p-1.5 rounded-lg">
-                        <svg className="h-4 w-4 text-indigo-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <svg className="h-3 w-3 sm:h-4 sm:w-4 text-indigo-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                           <line x1="3" y1="22" x2="21" y2="22"></line><line x1="6" y1="18" x2="6" y2="11"></line><line x1="10" y1="18" x2="10" y2="11"></line><line x1="14" y1="18" x2="14" y2="11"></line><line x1="18" y1="18" x2="18" y2="11"></line><polygon points="12 2 20 7 4 7"></polygon>
                         </svg>
                       </div>
-                      <span className="font-bold text-foreground">Bank Transfer</span>
+                      <span className="font-bold text-foreground text-sm sm:text-base">Bank Transfer</span>
                     </div>
-                    <div className="text-xs text-muted-foreground mt-1">Online or branch deposit</div>
+                    <div className="text-[10px] sm:text-xs text-muted-foreground mt-1">Online or branch deposit</div>
                   </button>
 
-                  {/* 3. Over the Counter Button */}
+                  {/* OTC */}
                   <button 
                     type="button"
                     onClick={() => setPaymentMethod('otc')} 
-                    className={`p-4 rounded-xl border text-left transition-all ${paymentMethod === 'otc' ? 'border-primary bg-primary/5 ring-1 ring-primary' : 'border-border hover:bg-accent'}`}
+                    className={`p-3 sm:p-4 rounded-xl border text-left transition-all ${paymentMethod === 'otc' ? 'border-primary bg-primary/5 ring-1 ring-primary' : 'border-border hover:bg-accent'}`}
                   >
                     <div className="flex items-center gap-2 mb-1">
                       <div className="bg-orange-100 p-1.5 rounded-lg">
-                        <svg className="h-4 w-4 text-orange-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <svg className="h-3 w-3 sm:h-4 sm:w-4 text-orange-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                           <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline>
                         </svg>
                       </div>
-                      <span className="font-bold text-foreground">Over the Counter</span>
+                      <span className="font-bold text-foreground text-sm sm:text-base">Over the Counter</span>
                     </div>
-                    <div className="text-xs text-muted-foreground mt-1">Partner payment center</div>
+                    <div className="text-[10px] sm:text-xs text-muted-foreground mt-1">Partner payment center</div>
                   </button>
 
-                  {/* 4. Cash Button */}
+                  {/* Cash */}
                   <button 
                     type="button"
                     onClick={() => setPaymentMethod('cash')} 
-                    className={`p-4 rounded-xl border text-left transition-all ${paymentMethod === 'cash' ? 'border-primary bg-primary/5 ring-1 ring-primary' : 'border-border hover:bg-accent'}`}
+                    className={`p-3 sm:p-4 rounded-xl border text-left transition-all ${paymentMethod === 'cash' ? 'border-primary bg-primary/5 ring-1 ring-primary' : 'border-border hover:bg-accent'}`}
                   >
                     <div className="flex items-center gap-2 mb-1">
                       <div className="bg-emerald-100 p-1.5 rounded-lg">
-                        <svg className="h-4 w-4 text-emerald-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <svg className="h-3 w-3 sm:h-4 sm:w-4 text-emerald-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                           <rect x="2" y="6" width="20" height="12" rx="2"></rect><circle cx="12" cy="12" r="2"></circle><path d="M6 12h.01M18 12h.01"></path>
                         </svg>
                       </div>
-                      <span className="font-bold text-foreground">Cash</span>
+                      <span className="font-bold text-foreground text-sm sm:text-base">Cash</span>
                     </div>
-                    <div className="text-xs text-muted-foreground mt-1">Pay at the office</div>
+                    <div className="text-[10px] sm:text-xs text-muted-foreground mt-1">Pay at the office</div>
                   </button>
                 </div>
               </div>
@@ -1200,7 +1108,7 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
                 </div>
               </div>
 
-              <div className="rounded-xl bg-muted/50 border border-border p-4 text-sm text-muted-foreground">
+              <div className="rounded-xl bg-muted/50 border border-border p-4 text-xs sm:text-sm text-muted-foreground">
                 This creates a pending transaction for admin verification. Once admin marks it paid, your survey payment status updates.
               </div>
 

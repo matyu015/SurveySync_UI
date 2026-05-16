@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Map, LayoutDashboard, FileText, Calendar as CalendarIcon, Users, FileCheck, CreditCard, Database, BarChart3, Settings, LogOut, Moon, Sun, Search, Filter, Download, ChevronLeft, ChevronRight, CheckCircle2, XCircle, Clock, AlertCircle, TrendingUp, Loader2, Trash2, ExternalLink, Bell, Edit } from 'lucide-react';
+import { Map, LayoutDashboard, FileText, Calendar as CalendarIcon, Users, FileCheck, CreditCard, BarChart3, Settings, LogOut, Moon, Sun, Search, Filter, Download, ChevronLeft, ChevronRight, CheckCircle2, XCircle, X, Clock, AlertCircle, TrendingUp, Loader2, Trash2, ExternalLink, Bell, Edit, Menu } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line } from 'recharts';
 import { useAuth } from '../context/AuthContext';
 import { SURVEY_TYPES, BARANGAYS, mockPayments, mockRequests, mockUsers } from '../data/mockData';
@@ -13,20 +13,24 @@ const db = getFirestore(getApp());
 
 // Custom bulletproof Peso Icon
 const PesoIcon = ({ className }: { className?: string }) => (
-  <svg
-    xmlns="http://www.w3.org/2000/svg"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    className={className}
-  >
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
     <path d="M20 11H4" />
     <path d="M20 15H4" />
     <path d="M7 21V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v17" />
     <path d="M7 11h6a4 4 0 0 0 0-8H7" />
+  </svg>
+);
+
+// Custom SurveySync Logo
+const SurveySyncLogo = ({ className = "size-8" }) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <polygon points="12 3 22 8.5 22 15.5 12 21 2 15.5 2 8.5 12 3" className="text-primary fill-primary/10" />
+    <polyline points="2 8.5 12 14.5 22 8.5" className="text-primary" />
+    <line x1="12" y1="21" x2="12" y2="14.5" className="text-primary" />
+    <circle cx="12" cy="14.5" r="1.5" className="fill-primary text-primary" />
+    <circle cx="12" cy="3" r="1.5" className="fill-primary text-primary" />
+    <circle cx="2" cy="8.5" r="1.5" className="fill-primary text-primary" />
+    <circle cx="22" cy="8.5" r="1.5" className="fill-primary text-primary" />
   </svg>
 );
 
@@ -42,6 +46,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
   const { logout } = useAuth();
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   
   // Real-time Data State
@@ -70,16 +75,14 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
   const [availabilityNote, setAvailabilityNote] = useState('');
   const [isSavingAvailability, setIsSavingAvailability] = useState(false);
 
-  // Firestore Real-time Listeners
+  // Firestore Listeners
   useEffect(() => {
     setIsLoading(true);
 
     const unsubRequests = onSnapshot(collection(db, 'requests'), (snapshot) => {
       setRequests(mergeLocalDocuments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })), getLocalCollection('requests')));
     }, (error) => {
-      if (!isMissingFirestoreDatabase(error)) {
-        console.error("Error loading requests:", error);
-      }
+      if (!isMissingFirestoreDatabase(error)) console.error("Error loading requests:", error);
       setRequests(mergeLocalDocuments(mockRequests, getLocalCollection('requests')));
       setIsLoading(false);
     });
@@ -88,9 +91,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
     const unsubClients = onSnapshot(qClients, (snapshot) => {
       setClients(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     }, (error) => {
-      if (!isMissingFirestoreDatabase(error)) {
-        console.error("Error loading clients:", error);
-      }
+      if (!isMissingFirestoreDatabase(error)) console.error("Error loading clients:", error);
       setClients(mockUsers.filter(user => user.role === 'client'));
       setIsLoading(false);
     });
@@ -99,9 +100,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
       setPayments(mergeLocalDocuments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })), getLocalCollection('payments')));
       setIsLoading(false); 
     }, (error) => {
-      if (!isMissingFirestoreDatabase(error)) {
-        console.error("Error loading payments:", error);
-      }
+      if (!isMissingFirestoreDatabase(error)) console.error("Error loading payments:", error);
       setPayments(mergeLocalDocuments(mockPayments, getLocalCollection('payments')));
       setIsLoading(false);
     });
@@ -109,9 +108,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
     const unsubAvailability = onSnapshot(collection(db, 'availability'), (snapshot) => {
       setAvailabilitySlots(mergeLocalDocuments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })), getLocalCollection('availability')));
     }, (error) => {
-      if (!isMissingFirestoreDatabase(error)) {
-        console.error("Error loading availability:", error);
-      }
+      if (!isMissingFirestoreDatabase(error)) console.error("Error loading availability:", error);
       setAvailabilitySlots(getLocalCollection('availability'));
     });
 
@@ -123,7 +120,6 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
     };
   }, []);
 
-  // Reset editing state when a new request is selected
   useEffect(() => {
     if (selectedRequest) {
       setIsEditingSchedule(false);
@@ -167,16 +163,14 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
     }
   };
 
-
-  // --- MANAGEMENT ACTIONS ---
+  // --- ACTIONS ---
   const handleUpdateStatus = async (requestId: string, newStatus: string) => {
     setIsUpdating(true);
     try {
       if (requestId.startsWith('local-')) {
         updateLocalDoc('requests', requestId, { status: newStatus });
       } else {
-        const requestRef = doc(db, 'requests', requestId);
-        await updateDoc(requestRef, { status: newStatus });
+        await updateDoc(doc(db, 'requests', requestId), { status: newStatus });
       }
       if (selectedRequest) setSelectedRequest({ ...selectedRequest, status: newStatus });
     } catch (error) {
@@ -199,15 +193,12 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
       if (selectedRequest._localOnly) {
         updateLocalDoc('requests', selectedRequest.id, scheduleUpdate);
       } else {
-        const requestRef = doc(db, 'requests', selectedRequest.id);
-        await updateDoc(requestRef, scheduleUpdate);
+        await updateDoc(doc(db, 'requests', selectedRequest.id), scheduleUpdate);
       }
       if (selectedRequest) {
         setSelectedRequest({
           ...selectedRequest,
-          scheduledDate: scheduleDate,
-          scheduledTime: scheduleTime,
-          status: 'scheduled',
+          ...scheduleUpdate
         });
       }
       setIsEditingSchedule(false);
@@ -233,7 +224,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
   };
 
   const handleCancelRequest = async (requestId: string) => {
-    if (!window.confirm("Are you sure you want to cancel this request? This will mark it as Cancelled in the database.")) return;
+    if (!window.confirm("Are you sure you want to cancel this request? This will mark it as Cancelled.")) return;
     setIsUpdating(true);
     try {
       if (requestId.startsWith('local-')) {
@@ -271,37 +262,24 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
     }
   };
 
-  const saveAvailabilitySlot = async (slotPayload: Record<string, any>) => {
-    try {
-      try {
-        await addDoc(collection(db, 'availability'), slotPayload);
-      } catch (firestoreError) {
-        console.error("Firestore availability save failed:", firestoreError);
-      }
-    } catch (error) {
-      console.error("Error saving availability:", error);
-      alert("Failed to save calendar availability.");
-    }
-  };
-
   const handleAddAvailability = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!availabilityDate || !availabilityStartTime || !availabilityEndTime) return;
 
     setIsSavingAvailability(true);
     try {
-      await saveAvailabilitySlot({
+      const payload = {
         date: availabilityDate,
         startTime: availabilityStartTime,
         endTime: availabilityEndTime,
         status: availabilityStatus,
         note: availabilityNote,
         createdAt: new Date().toISOString(),
-      });
+      };
+      await addDoc(collection(db, 'availability'), payload);
       setAvailabilityNote('');
     } catch (error) {
       console.error("Error saving availability:", error);
-      alert("Failed to save calendar availability.");
     } finally {
       setIsSavingAvailability(false);
     }
@@ -311,7 +289,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
     setAvailabilityDate(dateKey);
     setIsSavingAvailability(true);
     try {
-      await saveAvailabilitySlot({
+      await addDoc(collection(db, 'availability'), {
         date: dateKey,
         startTime: availabilityStartTime,
         endTime: availabilityEndTime,
@@ -336,7 +314,6 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
       }
     } catch (error) {
       console.error("Error deleting availability:", error);
-      alert("Failed to remove calendar slot.");
     }
   };
 
@@ -346,11 +323,8 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
       onLogout();
     } catch (error) {
       console.error("Failed to log out:", error);
-      alert("Failed to log out. Please try again.");
     }
   };
-
-  // --- HELPERS ---
 
   const statusColor = (status: string) => {
     const colors: Record<string, string> = {
@@ -359,7 +333,6 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
       documents_verified: 'bg-green-500/10 text-green-500 border-green-500/20',
       scheduled: 'bg-purple-500/10 text-purple-500 border-purple-500/20',
       field_survey: 'bg-indigo-500/10 text-indigo-500 border-indigo-500/20',
-      processing: 'bg-orange-500/10 text-orange-500 border-orange-500/20',
       completed: 'bg-success/10 text-success border-success/20',
       pending: 'bg-warning/10 text-warning border-warning/20',
       paid: 'bg-success/10 text-success border-success/20',
@@ -395,18 +368,10 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
     const unavailableCount = slots.filter(slot => slot.status === 'unavailable').length;
     const bookedCount = slots.filter(slot => slot.status === 'booked').length;
 
-    if (bookedCount || scheduledCount) {
-      return { status: 'booked' as const, label: `${bookedCount + scheduledCount} booked` };
-    }
-    if (availableCount && unavailableCount) {
-      return { status: 'mixed' as const, label: `${availableCount} open, ${unavailableCount} blocked` };
-    }
-    if (availableCount) {
-      return { status: 'available' as const, label: `${availableCount} available` };
-    }
-    if (unavailableCount) {
-      return { status: 'unavailable' as const, label: 'Unavailable' };
-    }
+    if (bookedCount || scheduledCount) return { status: 'booked' as const, label: `${bookedCount + scheduledCount} booked` };
+    if (availableCount && unavailableCount) return { status: 'mixed' as const, label: `${availableCount} open, ${unavailableCount} blocked` };
+    if (availableCount) return { status: 'available' as const, label: `${availableCount} available` };
+    if (unavailableCount) return { status: 'unavailable' as const, label: 'Unavailable' };
     return undefined;
   };
 
@@ -422,24 +387,49 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
 
   return (
     <div className={darkMode ? 'dark' : ''}>
-      <div className="min-h-screen bg-background flex">
-        {/* SIDEBAR */}
-        <aside className={`${sidebarCollapsed ? 'w-20' : 'w-64'} bg-sidebar border-r border-sidebar-border transition-all duration-300 flex flex-col`}>
+      <div className="min-h-screen bg-background flex text-foreground">
+        
+        {/* MOBILE OVERLAY */}
+        {isMobileMenuOpen && (
+          <div 
+            className="fixed inset-0 bg-background/80 backdrop-blur-sm z-40 md:hidden"
+            onClick={() => setIsMobileMenuOpen(false)}
+          />
+        )}
+
+        {/* RESPONSIVE SIDEBAR */}
+        <aside className={`
+          fixed inset-y-0 left-0 z-50 bg-sidebar border-r border-sidebar-border flex flex-col transition-all duration-300
+          md:relative md:translate-x-0
+          ${isMobileMenuOpen ? 'translate-x-0 w-64 shadow-2xl' : '-translate-x-full md:w-64'}
+          ${sidebarCollapsed && !isMobileMenuOpen ? 'md:w-20' : 'md:w-64'}
+        `}>
           <div className="p-6 border-b border-sidebar-border flex items-center justify-between">
-            {!sidebarCollapsed && (
+            {(!sidebarCollapsed || isMobileMenuOpen) && (
               <div className="flex items-center gap-3">
-                <div className="size-10 bg-sidebar-primary rounded-lg flex items-center justify-center">
-                  <Map className="size-6 text-sidebar-primary-foreground" />
+                <div className="size-10 bg-sidebar-primary/10 border border-sidebar-primary/20 rounded-xl flex items-center justify-center shadow-sm">
+                  <SurveySyncLogo className="size-6 text-sidebar-primary" />
                 </div>
-                <h1 className="text-lg">SurveySync</h1>
+                <h1 className="text-xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-br from-foreground to-foreground/70">
+                  SurveySync
+                </h1>
               </div>
             )}
-            <button onClick={() => setSidebarCollapsed(!sidebarCollapsed)} className="p-2 rounded-lg hover:bg-sidebar-accent">
+            <button 
+              onClick={() => isMobileMenuOpen ? setIsMobileMenuOpen(false) : setSidebarCollapsed(!sidebarCollapsed)} 
+              className="p-2 rounded-lg hover:bg-sidebar-accent hidden md:block"
+            >
               {sidebarCollapsed ? <ChevronRight className="size-5" /> : <ChevronLeft className="size-5" />}
+            </button>
+            <button 
+              onClick={() => setIsMobileMenuOpen(false)} 
+              className="p-2 rounded-lg hover:bg-sidebar-accent md:hidden text-sidebar-foreground"
+            >
+              <X className="size-5" />
             </button>
           </div>
 
-          <nav className="flex-1 p-4 space-y-1">
+          <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
             {[
               { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
               { id: 'requests', label: 'Requests', icon: FileText },
@@ -450,30 +440,39 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
             ].map(item => (
               <button
                 key={item.id}
-                onClick={() => setActiveTab(item.id as Tab)}
+                onClick={() => {
+                  setActiveTab(item.id as Tab);
+                  setIsMobileMenuOpen(false);
+                }}
                 className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
                   activeTab === item.id ? 'bg-sidebar-primary text-sidebar-primary-foreground' : 'text-sidebar-foreground hover:bg-sidebar-accent'
                 }`}
               >
                 <item.icon className="size-5 flex-shrink-0" />
-                {!sidebarCollapsed && <span className="text-sm">{item.label}</span>}
+                {(!sidebarCollapsed || isMobileMenuOpen) && <span className="text-sm whitespace-nowrap">{item.label}</span>}
               </button>
             ))}
           </nav>
 
           <div className="p-4 border-t border-sidebar-border flex items-center gap-2">
-            <button onClick={handleLogout} className="p-2 rounded-lg text-destructive hover:bg-destructive/10 w-full flex items-center gap-2">
-              <LogOut className="size-5" /> {!sidebarCollapsed && <span>Logout</span>}
+            <button onClick={handleLogout} className="p-2 rounded-lg text-destructive hover:bg-destructive/10 w-full flex items-center gap-3">
+              <LogOut className="size-5 flex-shrink-0" /> 
+              {(!sidebarCollapsed || isMobileMenuOpen) && <span className="whitespace-nowrap">Logout</span>}
             </button>
           </div>
         </aside>
 
         {/* MAIN CONTENT */}
         <main className="flex-1 overflow-auto relative">
-          <header className="bg-card border-b border-border px-8 py-6 sticky top-0 z-30 flex justify-between items-center">
-            <h2 className="text-2xl font-semibold capitalize">{activeTab}</h2>
-            <div className="flex items-center gap-4">
-               
+          <header className="bg-card border-b border-border px-4 sm:px-8 py-4 sm:py-6 sticky top-0 z-30 flex justify-between items-center">
+            <div className="flex items-center gap-3">
+              <button onClick={() => setIsMobileMenuOpen(true)} className="md:hidden p-2 -ml-2 rounded-lg hover:bg-accent text-foreground">
+                <Menu className="size-6" />
+              </button>
+              <h2 className="text-xl sm:text-2xl font-semibold capitalize">{activeTab}</h2>
+            </div>
+            
+            <div className="flex items-center gap-2 sm:gap-4">
                {/* --- NOTIFICATION BELL --- */}
                <div className="relative">
                   <button 
@@ -490,7 +489,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
 
                   {/* Dropdown Menu */}
                   {showNotifications && (
-                    <div className="absolute right-0 mt-3 w-80 bg-card border border-border rounded-xl shadow-2xl z-50 overflow-hidden">
+                    <div className="absolute right-0 mt-3 w-80 max-w-[90vw] bg-card border border-border rounded-xl shadow-2xl z-50 overflow-hidden">
                       <div className="p-3 border-b border-border bg-muted/30 font-semibold flex justify-between items-center">
                         Notifications
                         <span className="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full">{totalNotifications} new</span>
@@ -522,7 +521,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                   )}
                </div>
 
-               <button onClick={toggleDarkMode} className="p-2 border border-border rounded-lg">
+               <button onClick={toggleDarkMode} className="p-2 border border-border rounded-lg hidden sm:block">
                   {darkMode ? <Sun className="size-5" /> : <Moon className="size-5" />}
                </button>
                <div className="relative hidden md:block">
@@ -532,7 +531,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
             </div>
           </header>
 
-          <div className="p-8">
+          <div className="p-4 sm:p-8">
             
             {/* --- DASHBOARD TAB --- */}
             {activeTab === 'dashboard' && (
@@ -554,44 +553,46 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                   ))}
                 </div>
 
-                <div className="bg-card rounded-xl border border-border">
-                  <div className="p-6 border-b border-border"><h3>Recent Requests</h3></div>
-                  <table className="w-full">
-                    <thead className="bg-muted/50 text-xs uppercase text-muted-foreground">
-                      <tr>
-                        <th className="px-6 py-4 text-left">Ref No</th>
-                        <th className="px-6 py-4 text-left">Client</th>
-                        <th className="px-6 py-4 text-left">Type</th>
-                        <th className="px-6 py-4 text-left">Status</th>
-                        <th className="px-6 py-4 text-left">Action</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border">
-                      {requests.slice(0, 8).map(request => (
-                        <tr key={request.id} className="hover:bg-accent/30 transition-colors">
-                          <td className="px-6 py-4 text-sm font-medium">{request.referenceNo}</td>
-                          <td className="px-6 py-4 text-sm">{request.clientName}</td>
-                          <td className="px-6 py-4 text-sm">{request.surveyType}</td>
-                          <td className="px-6 py-4">
-                            <span className={`px-3 py-1 rounded-full text-xs border ${statusColor(request.status)}`}>
-                              {request.status.replace(/_/g, ' ')}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4">
-                            <button onClick={() => setSelectedRequest(request)} className="text-primary hover:underline text-sm font-medium">Manage</button>
-                          </td>
+                <div className="bg-card rounded-xl border border-border overflow-hidden">
+                  <div className="p-6 border-b border-border"><h3 className="font-bold">Recent Requests</h3></div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead className="bg-muted/50 text-xs uppercase text-muted-foreground">
+                        <tr>
+                          <th className="px-6 py-4 text-left">Ref No</th>
+                          <th className="px-6 py-4 text-left">Client</th>
+                          <th className="px-6 py-4 text-left">Type</th>
+                          <th className="px-6 py-4 text-left">Status</th>
+                          <th className="px-6 py-4 text-left">Action</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody className="divide-y divide-border">
+                        {requests.slice(0, 8).map(request => (
+                          <tr key={request.id} className="hover:bg-accent/30 transition-colors">
+                            <td className="px-6 py-4 text-sm font-medium">{request.referenceNo}</td>
+                            <td className="px-6 py-4 text-sm">{request.clientName}</td>
+                            <td className="px-6 py-4 text-sm">{request.surveyType}</td>
+                            <td className="px-6 py-4">
+                              <span className={`px-3 py-1 rounded-full text-xs border ${statusColor(request.status)}`}>
+                                {request.status.replace(/_/g, ' ')}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4">
+                              <button onClick={() => setSelectedRequest(request)} className="text-primary hover:underline text-sm font-medium">Manage</button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               </div>
             )}
 
             {/* --- REQUESTS TAB --- */}
             {activeTab === 'requests' && (
-               <div className="bg-card rounded-xl border border-border overflow-hidden">
-                  <table className="w-full">
+               <div className="bg-card rounded-xl border border-border overflow-hidden overflow-x-auto">
+                  <table className="w-full min-w-[600px]">
                      <thead className="bg-muted/50 text-xs">
                         <tr>
                            <th className="px-6 py-4 text-left">Date</th>
@@ -816,7 +817,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                 <div className="grid md:grid-cols-3 gap-4">
                   {[
                     { label: 'Total Collected', value: `₱${payments.filter(p => p.status === 'paid').reduce((sum, p) => sum + p.amount, 0).toLocaleString()}`, icon: CheckCircle2, color: 'bg-success' },
-                    { label: 'Pending Verification', value: `₱${payments.filter(p => p.status === 'pending').reduce((sum, p) => sum + p.amount, 0).toLocaleString()}`, icon: Clock, color: 'bg-warning' },
+                    { label: 'Pending Verification', value: `₱${pendingPaymentList.reduce((sum, p) => sum + p.amount, 0).toLocaleString()}`, icon: Clock, color: 'bg-warning' },
                     { label: 'Total Transactions', value: payments.length, icon: CreditCard, color: 'bg-blue-500' }
                   ].map(stat => (
                     <div key={stat.label} className="bg-card p-6 rounded-xl border border-border">
@@ -829,8 +830,8 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                   ))}
                 </div>
 
-                <div className="bg-card rounded-xl border border-border overflow-hidden">
-                  <table className="w-full">
+                <div className="bg-card rounded-xl border border-border overflow-hidden overflow-x-auto">
+                  <table className="w-full min-w-[700px]">
                     <thead className="bg-muted/50">
                       <tr>
                         <th className="px-6 py-3 text-left text-sm">Reference</th>
@@ -885,11 +886,11 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
 
         {/* --- MANAGEMENT MODAL --- */}
         {selectedRequest && (
-          <div className="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center p-6">
+          <div className="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 sm:p-6">
             <div className="bg-card rounded-2xl border border-border max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
-              <div className="p-6 border-b border-border flex justify-between items-center bg-muted/20 sticky top-0 z-10 backdrop-blur-md">
+              <div className="p-4 sm:p-6 border-b border-border flex justify-between items-center bg-muted/20 sticky top-0 z-10 backdrop-blur-md">
                 <div>
-                  <h2 className="text-xl font-bold">{selectedRequest.referenceNo}</h2>
+                  <h2 className="text-lg sm:text-xl font-bold">{selectedRequest.referenceNo}</h2>
                   <p className="text-sm text-muted-foreground">{selectedRequest.surveyType}</p>
                 </div>
                 <button onClick={() => setSelectedRequest(null)} className="p-2 hover:bg-accent rounded-full">
@@ -897,11 +898,11 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                 </button>
               </div>
 
-              <div className="p-8 space-y-6">
+              <div className="p-4 sm:p-8 space-y-6">
                 
                 {/* Status Updater & Quick Actions */}
                 <div className="space-y-3">
-                  <div className="bg-primary/5 border border-primary/20 p-4 rounded-xl flex items-center justify-between">
+                  <div className="bg-primary/5 border border-primary/20 p-4 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                     <div>
                       <div className="text-xs uppercase text-primary font-bold mb-1">Current Status</div>
                       <div className="text-lg capitalize font-medium">{selectedRequest.status.replace(/_/g, ' ')}</div>
@@ -911,7 +912,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                         disabled={isUpdating}
                         value={selectedRequest.status}
                         onChange={(e) => handleUpdateStatus(selectedRequest.id, e.target.value)}
-                        className="bg-background border border-border px-3 py-2 rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary"
+                        className="bg-background border border-border px-3 py-2 rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary w-full sm:w-auto"
                       >
                         <option value="submitted">Submitted</option>
                         <option value="under_review">Under Review</option>
@@ -977,7 +978,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                        </div>
                     ) : (
                        <div className="space-y-4">
-                          <div className="flex gap-4">
+                          <div className="flex flex-col sm:flex-row gap-4">
                              <input 
                                 type="date" 
                                 value={scheduleDate}
@@ -1014,13 +1015,14 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                 )}
 
                 {/* Details Grid */}
-                <div className="grid grid-cols-2 gap-6">
+                <div className="grid sm:grid-cols-2 gap-6">
                   <div className="space-y-4">
                     <h4 className="text-sm font-bold border-b border-border pb-1">Client Information</h4>
                     <div className="text-sm">
                       <div className="text-muted-foreground">Name</div>
                       <div className="font-medium">{selectedRequest.clientName}</div>
                     </div>
+                    {/* Upgraded Payment Badge */}
                     <div className="text-sm pt-2">
                       <div className="text-muted-foreground mb-2">Payment Status</div>
                       <span className={`px-3 py-1.5 rounded-md text-xs font-bold uppercase tracking-wider border ${
@@ -1043,31 +1045,31 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                     <h4 className="text-sm font-bold border-b border-border pb-1">Property Location</h4>
                     <div className="text-sm">
                       <div className="text-muted-foreground">Lot / Block</div>
-                      <div className="font-medium">Lot {selectedRequest.propertyDetails?.lotNumber}, Block {selectedRequest.propertyDetails?.blockNumber}</div>
+                      <div className="font-medium">Lot {selectedRequest.propertyDetails?.lotNumber || 'TBA'}, Block {selectedRequest.propertyDetails?.blockNumber || 'TBA'}</div>
                     </div>
                     <div className="text-sm">
                       <div className="text-muted-foreground">Address</div>
-                      <div className="font-medium">{selectedRequest.propertyDetails?.address?.street}, {selectedRequest.propertyDetails?.address?.barangay}</div>
+                      <div className="font-medium">{selectedRequest.propertyDetails?.address?.street}, {selectedRequest.propertyDetails?.address?.province || 'Bataan'}</div>
                     </div>
                   </div>
                 </div>
 
-                <div className="pt-6 border-t border-border flex justify-between">
-                   <div className="flex gap-2">
+                <div className="pt-6 border-t border-border flex flex-col-reverse sm:flex-row sm:justify-between gap-4">
+                   <div className="flex gap-2 w-full sm:w-auto">
                      <button 
                       onClick={() => handleDeleteRequest(selectedRequest.id)}
-                      className="flex items-center gap-2 text-destructive hover:bg-destructive/10 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+                      className="flex-1 sm:flex-none justify-center flex items-center gap-2 text-destructive hover:bg-destructive/10 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
                      >
                         <Trash2 className="size-4" /> Delete
                      </button>
                      <button 
                       onClick={() => handleCancelRequest(selectedRequest.id)}
-                      className="flex items-center gap-2 text-red-500 hover:bg-red-500/10 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+                      className="flex-1 sm:flex-none justify-center flex items-center gap-2 text-red-500 hover:bg-red-500/10 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
                      >
-                        <XCircle className="size-4" /> Cancel Request
+                        <XCircle className="size-4" /> Cancel
                      </button>
                    </div>
-                   <button onClick={() => setSelectedRequest(null)} className="px-6 py-2 bg-foreground text-background rounded-lg text-sm font-bold">
+                   <button onClick={() => setSelectedRequest(null)} className="w-full sm:w-auto px-6 py-2 bg-foreground text-background rounded-lg text-sm font-bold">
                       Close Panel
                    </button>
                 </div>

@@ -45,6 +45,7 @@ type Tab = 'dashboard' | 'requests' | 'calendar' | 'clients' | 'documents' | 'pa
 export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: AdminDashboardProps) {
   const { logout } = useAuth();
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   
@@ -127,6 +128,16 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
     }
   }, [selectedRequest]);
 
+  // --- HELPER: GET REAL CLIENT NAME ---
+  const getClientName = (clientId: string, fallbackName: string) => {
+    if (!clientId) return fallbackName;
+    const clientUser = clients.find(c => c.id === clientId || c.uid === clientId);
+    if (clientUser) {
+      return clientUser.fullName || clientUser.name || (clientUser.firstName && clientUser.lastName ? `${clientUser.firstName} ${clientUser.lastName}` : null) || clientUser.displayName || fallbackName;
+    }
+    return fallbackName;
+  };
+
   // --- NOTIFICATION LOGIC ---
   const pendingRequests = requests.filter(r => r.status === 'submitted' || r.status === 'under_review');
   const pendingPaymentList = payments.filter(p => p.status === 'pending');
@@ -137,7 +148,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
       id: r.id,
       type: 'request',
       title: 'New Survey Request',
-      desc: `${r.clientName} submitted a ${r.surveyType}`,
+      desc: `${getClientName(r.clientId, r.clientName)} submitted a ${r.surveyType}`,
       date: r.submittedAt || r.createdAt || new Date().toISOString(),
       ref: r.referenceNo
     })),
@@ -145,7 +156,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
       id: p.id,
       type: 'payment',
       title: 'Payment Verification',
-      desc: `${p.clientName} submitted a payment of ₱${p.amount.toLocaleString()}`,
+      desc: `${getClientName(p.clientId, p.clientName)} submitted a payment of ₱${p.amount.toLocaleString()}`,
       date: p.createdAt || new Date().toISOString(),
       ref: p.referenceNo
     }))
@@ -396,7 +407,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
           />
         )}
 
-        {/* RESPONSIVE SIDEBAR: Fully visible on desktop, slides off-canvas on mobile */}
+        {/* RESPONSIVE SIDEBAR */}
         <aside className={`
           fixed inset-y-0 left-0 z-50 bg-sidebar border-r border-sidebar-border flex flex-col transition-transform duration-300 w-64
           md:relative md:translate-x-0
@@ -411,7 +422,6 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                 SurveySync
               </h1>
             </div>
-            {/* Close button only visible on mobile inside the sidebar */}
             <button 
               onClick={() => setIsMobileMenuOpen(false)} 
               className="p-2 rounded-lg hover:bg-sidebar-accent md:hidden text-sidebar-foreground"
@@ -562,7 +572,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                         {requests.slice(0, 8).map(request => (
                           <tr key={request.id} className="hover:bg-accent/30 transition-colors">
                             <td className="px-6 py-4 text-sm font-medium">{request.referenceNo}</td>
-                            <td className="px-6 py-4 text-sm">{request.clientName}</td>
+                            <td className="px-6 py-4 text-sm">{getClientName(request.clientId, request.clientName)}</td>
                             <td className="px-6 py-4 text-sm">{request.surveyType}</td>
                             <td className="px-6 py-4">
                               <span className={`px-3 py-1 rounded-full text-xs border ${statusColor(request.status)}`}>
@@ -600,7 +610,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                            <tr key={request.id} className="hover:bg-accent/30 transition-colors">
                               <td className="px-6 py-4 text-sm">{formatDate(request.submittedAt)}</td>
                               <td className="px-6 py-4 text-sm">{request.referenceNo}</td>
-                              <td className="px-6 py-4 text-sm">{request.clientName}</td>
+                              <td className="px-6 py-4 text-sm">{getClientName(request.clientId, request.clientName)}</td>
                               <td className="px-6 py-4 text-sm">{request.surveyType}</td>
                               <td className="px-6 py-4">
                                  <span className={`px-2 py-1 rounded text-xs border ${statusColor(request.status)}`}>{request.status.replace(/_/g, ' ')}</span>
@@ -743,7 +753,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                               <div>
                                 <div className="font-medium">{formatSlotTime(slot)}</div>
                                 <div className="text-sm text-muted-foreground">
-                                  {slot.status === 'booked' ? `Booked by ${slot.clientName || 'client'}` : slot.note || 'No note'}
+                                  {slot.status === 'booked' ? `Booked by ${getClientName(slot.bookedBy, slot.clientName) || 'client'}` : slot.note || 'No note'}
                                 </div>
                               </div>
                             </div>
@@ -782,7 +792,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                                     <span className="text-2xl font-bold">{new Date(request.scheduledDate).getDate()}</span>
                                  </div>
                                  <div>
-                                    <h4 className="font-bold mb-1">{request.clientName} - {request.surveyType}</h4>
+                                    <h4 className="font-bold mb-1">{getClientName(request.clientId, request.clientName)} - {request.surveyType}</h4>
                                     <div className="text-sm text-muted-foreground flex flex-wrap items-center gap-3">
                                        <span className="flex items-center gap-1"><Clock className="size-4"/> {request.scheduledTime || 'TBA'}</span>
                                        <span className="flex items-center gap-1"><Map className="size-4"/> {request.location || request.propertyDetails?.address?.street || 'Bataan'}</span>
@@ -1012,7 +1022,8 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                     <h4 className="text-sm font-bold border-b border-border pb-1">Client Information</h4>
                     <div className="text-sm">
                       <div className="text-muted-foreground">Name</div>
-                      <div className="font-medium">{selectedRequest.clientName}</div>
+                      {/* Using the real database name here! */}
+                      <div className="font-medium">{getClientName(selectedRequest.clientId, selectedRequest.clientName)}</div>
                     </div>
                     {/* Upgraded Payment Badge */}
                     <div className="text-sm pt-2">

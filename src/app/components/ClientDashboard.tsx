@@ -57,7 +57,6 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
   const { currentUser, logout } = useAuth();
 
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [clientCalendarMonth, setClientCalendarMonth] = useState(new Date());
@@ -373,28 +372,20 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
         />
       )}
 
-      {/* RESPONSIVE SIDEBAR */}
+      {/* RESPONSIVE SIDEBAR: Fully visible on desktop, slides off-canvas on mobile */}
       <aside className={`
-        fixed inset-y-0 left-0 z-50 bg-card border-r border-border flex flex-col transition-all duration-300
+        fixed inset-y-0 left-0 z-50 bg-card border-r border-border flex flex-col transition-transform duration-300 w-64
         md:relative md:translate-x-0
-        ${isMobileMenuOpen ? 'translate-x-0 w-64 shadow-2xl' : '-translate-x-full md:w-64'}
-        ${sidebarCollapsed && !isMobileMenuOpen ? 'md:w-20' : 'md:w-64'}
+        ${isMobileMenuOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full'}
       `}>
         <div className="h-16 flex items-center justify-between px-4 border-b border-border">
-          {(!sidebarCollapsed || isMobileMenuOpen) && (
-             <div className="flex items-center gap-3">
-               <div className="size-8 bg-primary/10 border border-primary/20 rounded-lg flex items-center justify-center shadow-sm">
-                 <SurveySyncLogo className="size-5 text-primary" />
-               </div>
-               <span className="font-bold text-lg tracking-tight bg-clip-text text-transparent bg-gradient-to-br from-foreground to-foreground/70">SurveySync</span>
+           <div className="flex items-center gap-3">
+             <div className="size-8 bg-primary/10 border border-primary/20 rounded-lg flex items-center justify-center shadow-sm">
+               <SurveySyncLogo className="size-5 text-primary" />
              </div>
-          )}
-          <button 
-            onClick={() => isMobileMenuOpen ? setIsMobileMenuOpen(false) : setSidebarCollapsed(!sidebarCollapsed)} 
-            className="p-2 rounded-lg hover:bg-accent text-muted-foreground hidden md:block"
-          >
-            <Menu className="size-5" />
-          </button>
+             <span className="font-bold text-lg tracking-tight bg-clip-text text-transparent bg-gradient-to-br from-foreground to-foreground/70">SurveySync</span>
+           </div>
+          {/* Close button only visible on mobile inside the sidebar */}
           <button 
             onClick={() => setIsMobileMenuOpen(false)} 
             className="p-2 rounded-lg hover:bg-accent text-muted-foreground md:hidden"
@@ -422,7 +413,7 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
               }`}
             >
               <item.icon className="size-5 flex-shrink-0" />
-              {(!sidebarCollapsed || isMobileMenuOpen) && <span className="font-medium whitespace-nowrap">{item.label}</span>}
+              <span className="font-medium whitespace-nowrap">{item.label}</span>
             </button>
           ))}
         </nav>
@@ -430,7 +421,7 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
         <div className="p-4 border-t border-border">
           <button onClick={handleLogout} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-destructive/10 text-destructive transition-colors">
             <LogOut className="size-5 flex-shrink-0" />
-            {(!sidebarCollapsed || isMobileMenuOpen) && <span className="font-medium whitespace-nowrap">Sign Out</span>}
+            <span className="font-medium whitespace-nowrap">Sign Out</span>
           </button>
         </div>
       </aside>
@@ -438,10 +429,11 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
       <main className="flex-1 flex flex-col min-w-0">
         <header className="h-16 bg-card/50 backdrop-blur-sm border-b border-border flex items-center justify-between px-4 sm:px-6 sticky top-0 z-10">
           <div className="flex items-center gap-4 flex-1">
+            {/* Hamburger Menu - Only visible on mobile/minimized screens */}
             <button onClick={() => setIsMobileMenuOpen(true)} className="md:hidden p-2 -ml-2 rounded-lg hover:bg-accent">
               <Menu className="size-6 text-foreground" />
             </button>
-            <div className="relative w-full max-w-md hidden md:block">
+            <div className="relative w-full max-w-md hidden lg:block">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
               <input
                 type="text"

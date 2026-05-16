@@ -45,7 +45,6 @@ type Tab = 'dashboard' | 'requests' | 'calendar' | 'clients' | 'documents' | 'pa
 export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: AdminDashboardProps) {
   const { logout } = useAuth();
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   
@@ -397,30 +396,22 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
           />
         )}
 
-        {/* RESPONSIVE SIDEBAR */}
+        {/* RESPONSIVE SIDEBAR: Fully visible on desktop, slides off-canvas on mobile */}
         <aside className={`
-          fixed inset-y-0 left-0 z-50 bg-sidebar border-r border-sidebar-border flex flex-col transition-all duration-300
+          fixed inset-y-0 left-0 z-50 bg-sidebar border-r border-sidebar-border flex flex-col transition-transform duration-300 w-64
           md:relative md:translate-x-0
-          ${isMobileMenuOpen ? 'translate-x-0 w-64 shadow-2xl' : '-translate-x-full md:w-64'}
-          ${sidebarCollapsed && !isMobileMenuOpen ? 'md:w-20' : 'md:w-64'}
+          ${isMobileMenuOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full'}
         `}>
           <div className="p-6 border-b border-sidebar-border flex items-center justify-between">
-            {(!sidebarCollapsed || isMobileMenuOpen) && (
-              <div className="flex items-center gap-3">
-                <div className="size-10 bg-sidebar-primary/10 border border-sidebar-primary/20 rounded-xl flex items-center justify-center shadow-sm">
-                  <SurveySyncLogo className="size-6 text-sidebar-primary" />
-                </div>
-                <h1 className="text-xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-br from-foreground to-foreground/70">
-                  SurveySync
-                </h1>
+            <div className="flex items-center gap-3">
+              <div className="size-10 bg-sidebar-primary/10 border border-sidebar-primary/20 rounded-xl flex items-center justify-center shadow-sm">
+                <SurveySyncLogo className="size-6 text-sidebar-primary" />
               </div>
-            )}
-            <button 
-              onClick={() => isMobileMenuOpen ? setIsMobileMenuOpen(false) : setSidebarCollapsed(!sidebarCollapsed)} 
-              className="p-2 rounded-lg hover:bg-sidebar-accent hidden md:block"
-            >
-              {sidebarCollapsed ? <ChevronRight className="size-5" /> : <ChevronLeft className="size-5" />}
-            </button>
+              <h1 className="text-xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-br from-foreground to-foreground/70">
+                SurveySync
+              </h1>
+            </div>
+            {/* Close button only visible on mobile inside the sidebar */}
             <button 
               onClick={() => setIsMobileMenuOpen(false)} 
               className="p-2 rounded-lg hover:bg-sidebar-accent md:hidden text-sidebar-foreground"
@@ -449,7 +440,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                 }`}
               >
                 <item.icon className="size-5 flex-shrink-0" />
-                {(!sidebarCollapsed || isMobileMenuOpen) && <span className="text-sm whitespace-nowrap">{item.label}</span>}
+                <span className="text-sm whitespace-nowrap">{item.label}</span>
               </button>
             ))}
           </nav>
@@ -457,15 +448,16 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
           <div className="p-4 border-t border-sidebar-border flex items-center gap-2">
             <button onClick={handleLogout} className="p-2 rounded-lg text-destructive hover:bg-destructive/10 w-full flex items-center gap-3">
               <LogOut className="size-5 flex-shrink-0" /> 
-              {(!sidebarCollapsed || isMobileMenuOpen) && <span className="whitespace-nowrap">Logout</span>}
+              <span className="whitespace-nowrap">Logout</span>
             </button>
           </div>
         </aside>
 
         {/* MAIN CONTENT */}
-        <main className="flex-1 overflow-auto relative">
+        <main className="flex-1 overflow-auto relative min-w-0">
           <header className="bg-card border-b border-border px-4 sm:px-8 py-4 sm:py-6 sticky top-0 z-30 flex justify-between items-center">
             <div className="flex items-center gap-3">
+              {/* Hamburger Menu - Only visible on mobile/minimized screens */}
               <button onClick={() => setIsMobileMenuOpen(true)} className="md:hidden p-2 -ml-2 rounded-lg hover:bg-accent text-foreground">
                 <Menu className="size-6" />
               </button>
@@ -524,7 +516,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                <button onClick={toggleDarkMode} className="p-2 border border-border rounded-lg hidden sm:block">
                   {darkMode ? <Sun className="size-5" /> : <Moon className="size-5" />}
                </button>
-               <div className="relative hidden md:block">
+               <div className="relative hidden lg:block">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
                   <input type="text" placeholder="Search..." className="pl-9 pr-4 py-2 border rounded-lg bg-background w-64" />
                </div>
@@ -817,7 +809,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                 <div className="grid md:grid-cols-3 gap-4">
                   {[
                     { label: 'Total Collected', value: `₱${payments.filter(p => p.status === 'paid').reduce((sum, p) => sum + p.amount, 0).toLocaleString()}`, icon: CheckCircle2, color: 'bg-success' },
-                    { label: 'Pending Verification', value: `₱${pendingPaymentList.reduce((sum, p) => sum + p.amount, 0).toLocaleString()}`, icon: Clock, color: 'bg-warning' },
+                    { label: 'Pending Verification', value: `₱${payments.filter(p => p.status === 'pending').reduce((sum, p) => sum + p.amount, 0).toLocaleString()}`, icon: Clock, color: 'bg-warning' },
                     { label: 'Total Transactions', value: payments.length, icon: CreditCard, color: 'bg-blue-500' }
                   ].map(stat => (
                     <div key={stat.label} className="bg-card p-6 rounded-xl border border-border">

@@ -70,15 +70,18 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
   // Notification State
   const [showNotifications, setShowNotifications] = useState(false);
 
+  // File Upload State
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isUploading, setIsUploading] = useState(false);
-
+  
+  // Request Modal State (Now with File Attachment)
   const [isRequestModalOpen, setIsRequestModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [surveyType, setSurveyType] = useState('Lot Plan / Relocation');
   const [location, setLocation] = useState('');
   const [notes, setNotes] = useState('');
   const [purpose, setPurpose] = useState('');
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
   const [selectedPaymentRequest, setSelectedPaymentRequest] = useState<any | null>(null);
   const [selectedScheduleRequestId, setSelectedScheduleRequestId] = useState('');
@@ -96,7 +99,6 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
       setRequests(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     });
 
-    // Listen for ALL documents belonging to this client (both their uploads AND admin uploads)
     const qDocs = query(collection(db, 'documents'), where('clientId', '==', currentUser.uid));
     const unsubscribeDocs = onSnapshot(qDocs, (snapshot) => {
       setUserDocs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
@@ -119,13 +121,11 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
     };
   }, [currentUser]);
 
-  // Separate client uploads from official admin results
   const adminUploads = userDocs.filter(doc => doc.uploadedBy === 'admin');
   const myUploads = userDocs.filter(doc => doc.uploadedBy !== 'admin');
 
   // --- CLIENT NOTIFICATION LOGIC ---
   const notificationItems = [
-    // 1. Scheduled Surveys
     ...requests.filter(r => r.scheduledDate && r.status !== 'completed' && r.status !== 'cancelled').map(r => ({
       id: `sched-${r.id}`,
       type: 'request',
@@ -134,7 +134,6 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
       date: r.createdAt || new Date().toISOString(), 
       ref: r.referenceNo || r.id
     })),
-    // 2. Verified Payments
     ...payments.filter(p => p.status === 'paid').map(p => ({
       id: `pay-${p.id}`,
       type: 'payment',
@@ -143,7 +142,6 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
       date: p.paidAt || p.createdAt || new Date().toISOString(),
       ref: p.referenceNo || p.id
     })),
-    // 3. Official Results Uploaded
     ...adminUploads.map(doc => ({
       id: `doc-${doc.id}`,
       type: 'vault',
@@ -152,7 +150,6 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
       date: doc.uploadedAt || new Date().toISOString(),
       ref: doc.requestRef || 'Vault'
     })),
-    // 4. Completed Surveys
     ...requests.filter(r => r.status === 'completed').map(r => ({
       id: `comp-${r.id}`,
       type: 'request',
@@ -172,6 +169,7 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
     else if (item.type === 'vault') setActiveTab('vault');
   };
 
+  // Standalone Vault Upload
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file || !currentUser) return;
@@ -191,7 +189,9 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
 
       await addDoc(collection(db, 'documents'), {
         clientId: currentUser.uid,
+        clientName: currentUser.displayName || currentUser.email?.split('@')[0] || 'Client',
         clientEmail: currentUser.email,
+        uploadedBy: 'client',
         name: file.name,
         fileUrl: publicUrlData.publicUrl,
         status: 'under_review',
@@ -210,18 +210,27 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
     }
   };
 
+  // Submit Request + Optional File Attachment
   const handleSubmitRequest = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser) return alert("Please log in to submit a request.");
 
+    if (selectedFile && selectedFile.size > 5 * 1024 * 1024) {
+      return alert("The attached file is too large. Maximum size is 5MB.");
+    }
+
     setIsSubmitting(true);
     try {
       const amount = SURVEY_PRICES[surveyType] || 5500;
+      const referenceNo = makeReference('SS');
+      const clientName = currentUser.displayName || currentUser.email?.split('@')[0] || 'Client';
+      
+      // 1. Create Request
       const requestPayload = {
-        referenceNo: makeReference('SS'),
+        referenceNo,
         clientId: currentUser.uid,
         clientEmail: currentUser.email,
-        clientName: currentUser.displayName || currentUser.email?.split('@')[0] || 'Client',
+        clientName,
         surveyType,
         location,
         notes,
@@ -236,15 +245,45 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
         },
       };
 
-      await addDoc(collection(db, 'requests'), requestPayload);
+      const newRequestRef = await addDoc(collection(db, 'requests'), requestPayload);
 
+      // 2. Upload Optional File and Link to Request
+      if (selectedFile) {
+        const fileName = `${currentUser.uid}/${Date.now()}_${selectedFile.name}`;
+        const { error: uploadError } = await supabase.storage.from('documents').upload(fileName, selectedFile);
+        
+        if (!uploadError) {
+          const { data: publicUrlData } = supabase.storage.from('documents').getPublicUrl(fileName);
+          await addDoc(collection(db, 'documents'), {
+            requestId: newRequestRef.id,
+            requestRef: referenceNo, // This explicitly links it for the Admin Document Review!
+            clientId: currentUser.uid,
+            clientName,
+            clientEmail: currentUser.email,
+            uploadedBy: 'client',
+            name: selectedFile.name,
+            fileUrl: publicUrlData.publicUrl,
+            status: 'under_review',
+            uploadedAt: new Date().toISOString(),
+            fileType: selectedFile.type,
+            fileSize: `${(selectedFile.size / (1024 * 1024)).toFixed(2)} MB`
+          });
+        } else {
+          console.error("File upload failed during request:", uploadError);
+          alert("Your request was submitted, but the file failed to upload.");
+        }
+      }
+
+      // Reset Modal Form
       setIsRequestModalOpen(false);
       setLocation('');
       setNotes('');
       setPurpose('');
       setSurveyType('Lot Plan / Relocation');
+      setSelectedFile(null);
       setSelectedScheduleRequestId('');
       setActiveTab('requests');
+
     } catch (error) {
       console.error("Error submitting request:", error);
       alert("Failed to submit request.");
@@ -507,7 +546,7 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
               )}
             </div>
 
-            <button onClick={toggleDarkMode} className="p-2 rounded-full hover:bg-accent text-muted-foreground transition-colors hidden sm:block">
+            <button onClick={toggleDarkMode} className="p-2 border border-border rounded-lg hidden sm:block">
               {darkMode ? <Sun className="size-5" /> : <Moon className="size-5" />}
             </button>
             <div className="size-9 rounded-full bg-primary/20 flex items-center justify-center text-primary font-bold border border-primary/30">
@@ -621,7 +660,6 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
 
               <div className="grid gap-4">
                 {sortedRequests.map((request) => {
-                  // Check if Admin has uploaded an official result for this specific request
                   const officialResult = adminUploads.find(doc => doc.requestId === request.id);
 
                   return (
@@ -947,6 +985,7 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
                       </div>
                       <h4 className="mb-1 font-medium truncate" title={doc.name}>{doc.name}</h4>
                       <p className="text-[10px] sm:text-xs text-muted-foreground mb-4">
+                        {doc.requestRef && <span>Req: {doc.requestRef} <br/></span>}
                         {doc.fileSize} - Uploaded {formatDate(doc.uploadedAt)}
                       </p>
 
@@ -970,7 +1009,7 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
         </div>
       </main>
 
-      {/* --- NEW REQUEST MODAL --- */}
+      {/* --- NEW REQUEST MODAL (NOW WITH UPLOAD) --- */}
       {isRequestModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm">
           <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-xl overflow-hidden max-h-[90vh] flex flex-col">
@@ -1035,6 +1074,33 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
                   onChange={(e) => setNotes(e.target.value)}
                   className="w-full px-4 py-3 bg-input-background border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/50 placeholder:text-muted-foreground resize-none transition-shadow"
                 />
+              </div>
+
+              {/* NEW UPLOAD SECTION INSIDE MODAL */}
+              <div className="border-t border-border pt-4">
+                <label className="block text-sm font-medium mb-1.5">Supporting Document (Optional)</label>
+                <div className={`border-2 border-dashed rounded-xl p-4 text-center transition-colors ${selectedFile ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50 bg-input-background'}`}>
+                  <input
+                    type="file"
+                    id="request-file"
+                    onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
+                    className="hidden"
+                    accept=".pdf,.jpg,.jpeg,.png"
+                  />
+                  {selectedFile ? (
+                    <div className="flex flex-col items-center gap-2">
+                      <FileText className="size-6 text-primary" />
+                      <span className="text-sm font-medium text-foreground truncate max-w-full px-4">{selectedFile.name}</span>
+                      <label htmlFor="request-file" className="text-xs text-primary hover:underline cursor-pointer">Replace file</label>
+                    </div>
+                  ) : (
+                    <label htmlFor="request-file" className="flex flex-col items-center cursor-pointer gap-2">
+                      <Upload className="size-6 text-muted-foreground" />
+                      <span className="text-sm font-medium">Click to attach a requirement</span>
+                      <span className="text-xs text-muted-foreground">Title, ID, or previous plans (Max 5MB)</span>
+                    </label>
+                  )}
+                </div>
               </div>
 
               <div className="pt-2 sm:pt-4 flex gap-3">

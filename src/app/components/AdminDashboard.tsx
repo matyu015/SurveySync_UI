@@ -669,8 +669,8 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                             <td className="px-6 py-4">
                              <button 
                               onClick={() => setSelectedRequest(request)} 
-                              className="px-3 py-1.5 border border-border rounded-lg text-sm font-medium hover:bg-accent transition-colors">
-                               Manage
+                              className="px-4 py-1.5 bg-primary/10 text-primary border border-primary/20 rounded-lg text-sm font-bold hover:bg-primary hover:text-white transition-all shadow-sm">
+                                Manage
                               </button>
                             </td>
                           </tr>
@@ -707,9 +707,9 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                                  <span className={`px-2 py-1 rounded text-xs border ${statusColor(request.status)}`}>{request.status.replace(/_/g, ' ')}</span>
                               </td>
                               <td className="px-6 py-4">
-                                 <button onClick={() => setSelectedRequest(request)} className="p-2 hover:bg-accent rounded-lg border border-border">
-                                    <ExternalLink className="size-4" />
-                                 </button>
+                                <button onClick={() => setSelectedRequest(request)} className="p-2 hover:bg-accent rounded-lg border border-border">
+                                  <ExternalLink className="size-4" />
+                                </button>
                               </td>
                            </tr>
                         ))}

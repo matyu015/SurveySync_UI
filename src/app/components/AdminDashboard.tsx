@@ -667,11 +667,10 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                               </span>
                             </td>
                             <td className="px-6 py-4">
-                              <button 
-                                onClick={() => setSelectedRequest(request)} 
-                                className="px-3 py-1.5 border border-border rounded-lg text-sm font-medium hover:bg-accent transition-colors"
-                              >
-                                Manage
+                             <button 
+                              onClick={() => setSelectedRequest(request)} 
+                              className="px-3 py-1.5 border border-border rounded-lg text-sm font-medium hover:bg-accent transition-colors">
+                               Manage
                               </button>
                             </td>
                           </tr>

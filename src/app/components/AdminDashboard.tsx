@@ -12,13 +12,13 @@ import MonthCalendar, { formatDateKey } from './MonthCalendar';
 
 const db = getFirestore(getApp());
 
-// Custom bulletproof Peso Icon
+// Clean, minimalist Peso Icon
 const PesoIcon = ({ className }: { className?: string }) => (
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
-    <path d="M20 11H4" />
-    <path d="M20 15H4" />
-    <path d="M7 21V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v17" />
-    <path d="M7 11h6a4 4 0 0 0 0-8H7" />
+    <line x1="4" x2="20" y1="7" y2="7" />
+    <line x1="4" x2="20" y1="11" y2="11" />
+    <path d="M7 21V3" />
+    <path d="M7 3h6a4 4 0 0 1 0 8H7" />
   </svg>
 );
 

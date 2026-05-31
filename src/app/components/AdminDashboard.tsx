@@ -719,6 +719,106 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                </div>
             )}
 
+            {/* --- CLIENTS DIRECTORY TAB (NEW) --- */}
+            {activeTab === 'clients' && (
+              <div className="space-y-6">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                  <div>
+                    <h2 className="text-2xl font-bold tracking-tight">Client Directory</h2>
+                    <p className="text-sm text-muted-foreground">Manage client profiles and view their request history.</p>
+                  </div>
+                </div>
+
+                <div className="grid gap-6">
+                  {clients.map(client => {
+                    const clientRequests = requests
+                      .filter(r => r.clientId === client.id || r.clientId === client.uid)
+                      .sort((a, b) => new Date(b.submittedAt || b.createdAt).getTime() - new Date(a.submittedAt || a.createdAt).getTime());
+
+                    return (
+                      <div key={client.id} className="bg-card rounded-xl border border-border overflow-hidden flex flex-col lg:flex-row shadow-sm">
+                        
+                        {/* Client Profile Side */}
+                        <div className="p-6 bg-muted/20 lg:w-1/3 border-b lg:border-b-0 lg:border-r border-border">
+                          <div className="flex items-center gap-4 mb-5">
+                            <div className="size-14 bg-primary/10 text-primary font-bold rounded-full flex items-center justify-center border border-primary/20 text-xl shadow-inner">
+                              {(getClientName(client.id, 'C')[0]).toUpperCase()}
+                            </div>
+                            <div className="overflow-hidden">
+                              <h3 className="font-bold text-lg truncate">{getClientName(client.id, 'Unknown Client')}</h3>
+                              <p className="text-sm text-muted-foreground truncate">{client.email || 'No email provided'}</p>
+                            </div>
+                          </div>
+                          
+                          <div className="space-y-3 text-sm">
+                            <div className="flex justify-between items-center py-2 border-b border-border/50">
+                              <span className="text-muted-foreground flex items-center gap-2"><FileText className="size-4" /> Total Requests</span>
+                              <span className="font-bold bg-primary/10 text-primary px-2.5 py-0.5 rounded-full">{clientRequests.length}</span>
+                            </div>
+                            <div className="flex justify-between items-center py-2 border-b border-border/50">
+                              <span className="text-muted-foreground flex items-center gap-2"><Clock className="size-4" /> Client Since</span>
+                              <span className="font-medium">{client.createdAt ? formatDate(client.createdAt) : 'N/A'}</span>
+                            </div>
+                          </div>
+                        </div>
+                        
+                        {/* Request History Side */}
+                        <div className="p-0 lg:w-2/3 bg-card">
+                          <div className="p-4 border-b border-border bg-muted/10 font-semibold text-sm">
+                             Survey History
+                          </div>
+                          {clientRequests.length > 0 ? (
+                            <div className="overflow-x-auto max-h-[250px] overflow-y-auto">
+                              <table className="w-full text-sm text-left">
+                                <thead className="bg-muted/50 text-xs uppercase text-muted-foreground sticky top-0 backdrop-blur-md">
+                                  <tr>
+                                    <th className="px-5 py-3">Reference</th>
+                                    <th className="px-5 py-3">Survey Type</th>
+                                    <th className="px-5 py-3">Date</th>
+                                    <th className="px-5 py-3">Status</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-border">
+                                  {clientRequests.map(req => (
+                                    <tr key={req.id} className="hover:bg-accent/30 transition-colors">
+                                      <td className="px-5 py-3 font-medium text-foreground">{req.referenceNo}</td>
+                                      <td className="px-5 py-3">{req.surveyType}</td>
+                                      <td className="px-5 py-3 text-muted-foreground">{formatDate(req.submittedAt || req.createdAt)}</td>
+                                      <td className="px-5 py-3">
+                                        <span className={`px-2.5 py-1 rounded-full text-[10px] sm:text-xs font-medium border whitespace-nowrap ${statusColor(req.status)}`}>
+                                          {req.status.replace(/_/g, ' ')}
+                                        </span>
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          ) : (
+                            <div className="p-8 text-center text-muted-foreground flex flex-col items-center justify-center h-full min-h-[200px]">
+                              <FileText className="size-8 opacity-20 mb-3" />
+                              <p className="font-medium">No request history found</p>
+                              <p className="text-xs mt-1">This client hasn't submitted any surveys yet.</p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  {clients.length === 0 && (
+                    <div className="text-center p-16 bg-card rounded-xl border border-border text-muted-foreground shadow-sm flex flex-col items-center">
+                      <div className="size-16 bg-muted/50 rounded-full flex items-center justify-center mb-4">
+                         <Users className="size-8 opacity-40" />
+                      </div>
+                      <p className="text-lg font-medium">No clients registered yet</p>
+                      <p className="text-sm mt-1">When clients create an account, they will appear here.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* --- DOCUMENTS TAB --- */}
             {activeTab === 'documents' && (
               <div className="space-y-6">
@@ -1252,7 +1352,6 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                     <h4 className="text-sm font-bold border-b border-border pb-1">Client Information</h4>
                     <div className="text-sm">
                       <div className="text-muted-foreground">Name</div>
-                      {/* Using the real database name here! */}
                       <div className="font-medium">{getClientName(selectedRequest.clientId, selectedRequest.clientName)}</div>
                     </div>
                     {/* Upgraded Payment Badge */}

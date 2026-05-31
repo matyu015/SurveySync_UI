@@ -74,7 +74,7 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isUploading, setIsUploading] = useState(false);
   
-  // Request Modal State (Now with File Attachment)
+  // Request Modal State
   const [isRequestModalOpen, setIsRequestModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [surveyType, setSurveyType] = useState('Lot Plan / Relocation');
@@ -83,12 +83,15 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
   const [purpose, setPurpose] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
+  // Payment Modal State
   const [selectedPaymentRequest, setSelectedPaymentRequest] = useState<any | null>(null);
   const [selectedScheduleRequestId, setSelectedScheduleRequestId] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('gcash');
   const [paymentReference, setPaymentReference] = useState('');
   const [paymentAmount, setPaymentAmount] = useState('');
+  const [paymentReceiptFile, setPaymentReceiptFile] = useState<File | null>(null); // NEW: State for receipt image
   const [isPaying, setIsPaying] = useState(false);
+  
   const [isBookingSchedule, setIsBookingSchedule] = useState(false);
 
   useEffect(() => {
@@ -225,7 +228,6 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
       const referenceNo = makeReference('SS');
       const clientName = currentUser.displayName || currentUser.email?.split('@')[0] || 'Client';
       
-      // 1. Create Request
       const requestPayload = {
         referenceNo,
         clientId: currentUser.uid,
@@ -247,7 +249,6 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
 
       const newRequestRef = await addDoc(collection(db, 'requests'), requestPayload);
 
-      // 2. Upload Optional File and Link to Request
       if (selectedFile) {
         const fileName = `${currentUser.uid}/${Date.now()}_${selectedFile.name}`;
         const { error: uploadError } = await supabase.storage.from('documents').upload(fileName, selectedFile);
@@ -256,7 +257,7 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
           const { data: publicUrlData } = supabase.storage.from('documents').getPublicUrl(fileName);
           await addDoc(collection(db, 'documents'), {
             requestId: newRequestRef.id,
-            requestRef: referenceNo, // This explicitly links it for the Admin Document Review!
+            requestRef: referenceNo, 
             clientId: currentUser.uid,
             clientName,
             clientEmail: currentUser.email,
@@ -268,13 +269,9 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
             fileType: selectedFile.type,
             fileSize: `${(selectedFile.size / (1024 * 1024)).toFixed(2)} MB`
           });
-        } else {
-          console.error("File upload failed during request:", uploadError);
-          alert("Your request was submitted, but the file failed to upload.");
         }
       }
 
-      // Reset Modal Form
       setIsRequestModalOpen(false);
       setLocation('');
       setNotes('');
@@ -296,6 +293,7 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
     setSelectedPaymentRequest(request);
     setPaymentAmount(String(request.amount || SURVEY_PRICES[request.surveyType] || 0));
     setPaymentReference('');
+    setPaymentReceiptFile(null);
     setPaymentMethod('gcash');
   };
 
@@ -336,14 +334,32 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
     }
   };
 
+  // Submit Payment + Supabase Image Upload
   const handleSubmitPayment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser || !selectedPaymentRequest) return;
     const numericAmount = Number(paymentAmount);
     if (!Number.isFinite(numericAmount) || numericAmount <= 0) return alert("Enter a valid payment amount.");
 
+    if (paymentReceiptFile && paymentReceiptFile.size > 5 * 1024 * 1024) {
+      return alert("The receipt image is too large. Maximum size is 5MB.");
+    }
+
     setIsPaying(true);
     try {
+      let receiptUrl = '';
+
+      // Upload receipt to Supabase if provided
+      if (paymentReceiptFile) {
+        const fileName = `receipts/${currentUser.uid}_${Date.now()}_${paymentReceiptFile.name}`;
+        const { error: uploadError } = await supabase.storage.from('documents').upload(fileName, paymentReceiptFile);
+        
+        if (uploadError) throw uploadError;
+        
+        const { data: publicUrlData } = supabase.storage.from('documents').getPublicUrl(fileName);
+        receiptUrl = publicUrlData.publicUrl;
+      }
+
       await addDoc(collection(db, 'payments'), {
         requestId: selectedPaymentRequest.id,
         requestRef: selectedPaymentRequest.referenceNo || selectedPaymentRequest.id,
@@ -354,10 +370,14 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
         method: paymentMethod,
         status: 'pending',
         referenceNo: paymentReference || makeReference(paymentMethod.toUpperCase()),
+        receiptUrl: receiptUrl || null,
         createdAt: new Date().toISOString(),
       });
+      
       await updateDoc(doc(db, 'requests', selectedPaymentRequest.id), { paymentStatus: 'partial' });
+      
       setSelectedPaymentRequest(null);
+      setPaymentReceiptFile(null);
       setActiveTab('payments');
     } catch (error) {
       console.error("Payment submission failed:", error);
@@ -1009,7 +1029,7 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
         </div>
       </main>
 
-      {/* --- NEW REQUEST MODAL (NOW WITH UPLOAD) --- */}
+      {/* --- NEW REQUEST MODAL --- */}
       {isRequestModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm">
           <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-xl overflow-hidden max-h-[90vh] flex flex-col">
@@ -1076,7 +1096,6 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
                 />
               </div>
 
-              {/* NEW UPLOAD SECTION INSIDE MODAL */}
               <div className="border-t border-border pt-4">
                 <label className="block text-sm font-medium mb-1.5">Supporting Document (Optional)</label>
                 <div className={`border-2 border-dashed rounded-xl p-4 text-center transition-colors ${selectedFile ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50 bg-input-background'}`}>
@@ -1144,7 +1163,7 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
                 <p className="text-sm text-muted-foreground">{selectedPaymentRequest.referenceNo || selectedPaymentRequest.id}</p>
               </div>
               <button
-                onClick={() => setSelectedPaymentRequest(null)}
+                onClick={() => { setSelectedPaymentRequest(null); setPaymentReceiptFile(null); }}
                 className="text-muted-foreground hover:text-foreground transition-colors p-1.5 rounded-lg hover:bg-accent"
               >
                 <X className="size-5" />
@@ -1249,6 +1268,33 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
                 </div>
               </div>
 
+              {/* NEW UPLOAD RECEIPT SECTION */}
+              <div className="border-t border-border pt-4">
+                <label className="block text-sm font-medium mb-1.5">Upload Receipt (Optional but recommended)</label>
+                <div className={`border-2 border-dashed rounded-xl p-4 text-center transition-colors ${paymentReceiptFile ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50 bg-input-background'}`}>
+                  <input
+                    type="file"
+                    id="receipt-file"
+                    onChange={(e) => setPaymentReceiptFile(e.target.files?.[0] || null)}
+                    className="hidden"
+                    accept=".jpg,.jpeg,.png"
+                  />
+                  {paymentReceiptFile ? (
+                    <div className="flex flex-col items-center gap-2">
+                      <FileCheck className="size-6 text-primary" />
+                      <span className="text-sm font-medium text-foreground truncate max-w-full px-4">{paymentReceiptFile.name}</span>
+                      <label htmlFor="receipt-file" className="text-xs text-primary hover:underline cursor-pointer">Replace image</label>
+                    </div>
+                  ) : (
+                    <label htmlFor="receipt-file" className="flex flex-col items-center cursor-pointer gap-2">
+                      <Upload className="size-6 text-muted-foreground" />
+                      <span className="text-sm font-medium">Click to attach screenshot</span>
+                      <span className="text-xs text-muted-foreground">JPG or PNG (Max 5MB)</span>
+                    </label>
+                  )}
+                </div>
+              </div>
+
               <div className="rounded-xl bg-muted/50 border border-border p-4 text-xs sm:text-sm text-muted-foreground">
                 This creates a pending transaction for admin verification. Once admin marks it paid, your survey payment status updates.
               </div>
@@ -1256,7 +1302,7 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
               <div className="pt-2 flex gap-3">
                 <button
                   type="button"
-                  onClick={() => setSelectedPaymentRequest(null)}
+                  onClick={() => { setSelectedPaymentRequest(null); setPaymentReceiptFile(null); }}
                   className="flex-1 px-4 py-3 bg-accent hover:bg-accent/80 text-foreground rounded-xl font-medium transition-colors"
                 >
                   Cancel

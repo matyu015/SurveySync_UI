@@ -67,6 +67,9 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
   const [isUpdating, setIsUpdating] = useState(false);
   const [isEditingSchedule, setIsEditingSchedule] = useState(false);
   
+  // Receipt Modal State (NEW)
+  const [selectedReceipt, setSelectedReceipt] = useState<string | null>(null);
+
   // Schedule Form State
   const [scheduleDate, setScheduleDate] = useState('');
   const [scheduleTime, setScheduleTime] = useState('');
@@ -719,7 +722,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                </div>
             )}
 
-            {/* --- CLIENTS DIRECTORY TAB (NEW) --- */}
+            {/* --- CLIENTS DIRECTORY TAB --- */}
             {activeTab === 'clients' && (
               <div className="space-y-6">
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
@@ -1190,16 +1193,28 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                               </span>
                             </td>
                             <td className="px-6 py-4">
-                              {payment.status === 'pending' ? (
-                                <button 
-                                  onClick={() => handleVerifyPayment(payment.id, payment.requestId)}
-                                  className="text-sm bg-primary text-primary-foreground px-3 py-1 rounded hover:opacity-90"
-                                >
-                                  Verify
-                                </button>
-                              ) : (
-                                <button className="text-sm text-muted-foreground hover:underline">Receipt</button>
-                              )}
+                              <div className="flex flex-wrap items-center gap-2">
+                                {payment.status === 'pending' && (
+                                  <button 
+                                    onClick={() => handleVerifyPayment(payment.id, payment.requestId)}
+                                    className="text-xs bg-primary text-primary-foreground px-3 py-1.5 rounded-md hover:opacity-90 font-medium transition-opacity"
+                                  >
+                                    Verify
+                                  </button>
+                                )}
+                                
+                                {/* New Receipt Viewer Button */}
+                                {payment.receiptUrl ? (
+                                  <button 
+                                    onClick={() => setSelectedReceipt(payment.receiptUrl)}
+                                    className="text-xs text-primary border border-primary/30 px-3 py-1.5 rounded-md hover:bg-primary/10 font-medium transition-colors flex items-center gap-1"
+                                  >
+                                    View Receipt
+                                  </button>
+                                ) : (
+                                  <span className="text-xs text-muted-foreground italic px-1">No image attached</span>
+                                )}
+                              </div>
                             </td>
                           </tr>
                         );
@@ -1405,6 +1420,51 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                       Close Panel
                    </button>
                 </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* --- RECEIPT MODAL (NEW) --- */}
+        {selectedReceipt && (
+          <div className="fixed inset-0 bg-background/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+            <div className="bg-card rounded-2xl border border-border max-w-lg w-full overflow-hidden shadow-2xl flex flex-col">
+              <div className="p-4 border-b border-border flex justify-between items-center bg-muted/20">
+                <h3 className="font-bold flex items-center gap-2">
+                  <FileText className="size-5 text-primary" /> Payment Receipt
+                </h3>
+                <button onClick={() => setSelectedReceipt(null)} className="p-2 hover:bg-accent rounded-full text-muted-foreground transition-colors">
+                  <X className="size-5" />
+                </button>
+              </div>
+              
+              <div className="p-4 flex justify-center bg-black/5 dark:bg-white/5 min-h-[300px] items-center">
+                <img 
+                  src={selectedReceipt} 
+                  alt="Client Payment Receipt" 
+                  className="max-h-[60vh] object-contain rounded-lg border border-border/50 shadow-sm" 
+                  onError={(e) => {
+                    e.currentTarget.style.display = 'none';
+                    e.currentTarget.parentElement!.innerHTML = '<div class="text-sm text-muted-foreground flex flex-col items-center gap-2"><svg class="size-8 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>Image failed to load. The URL might be broken or expired.</div>';
+                  }}
+                />
+              </div>
+
+              <div className="p-4 border-t border-border flex justify-end gap-3">
+                <button 
+                  onClick={() => setSelectedReceipt(null)}
+                  className="px-4 py-2 hover:bg-accent rounded-lg text-sm font-medium transition-colors"
+                >
+                  Close
+                </button>
+                <a 
+                  href={selectedReceipt} 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:opacity-90 transition-opacity flex items-center gap-2"
+                >
+                  <ExternalLink className="size-4" /> Open Full Image
+                </a>
               </div>
             </div>
           </div>

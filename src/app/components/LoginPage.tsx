@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { Map, ArrowLeft, Sun, Moon, Eye, EyeOff, Mail, Lock, Loader2, ShieldCheck, User } from 'lucide-react';
+import { Map, ArrowLeft, Sun, Moon, Eye, EyeOff, Mail, Lock, Loader2 } from 'lucide-react';
 
 interface LoginPageProps {
   onBackClick: () => void;
@@ -17,11 +17,7 @@ export default function LoginPage({ onBackClick, onRegisterClick, darkMode, togg
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   
-  // --- NEW: Toggle State for Client vs Admin ---
-  const [loginType, setLoginType] = useState<'client' | 'admin'>('client');
-  
   const { login } = useAuth();
-  
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -30,8 +26,7 @@ export default function LoginPage({ onBackClick, onRegisterClick, darkMode, togg
 
     try {
       await login(email, password);
-      // Note: App.tsx will still securely verify their role in the database 
-      // to ensure a client can't sneak in by clicking the admin tab!
+      // Note: App.tsx automatically routes the user based on @surveysync.com domain!
     } catch (err: any) {
       console.error(err);
       if (
@@ -65,9 +60,9 @@ export default function LoginPage({ onBackClick, onRegisterClick, darkMode, togg
         />
         <div className="absolute inset-0 bg-slate-950/60" />
         
-        {/* Dynamic Orbs based on login type */}
-        <div className={`absolute top-1/4 left-1/4 w-96 h-96 rounded-full mix-blend-screen filter blur-[100px] animate-pulse transition-colors duration-700 ${loginType === 'admin' ? 'bg-rose-500/30' : 'bg-blue-500/30'}`} />
-        <div className={`absolute bottom-1/4 right-1/4 w-96 h-96 rounded-full mix-blend-screen filter blur-[100px] animate-pulse delay-1000 transition-colors duration-700 ${loginType === 'admin' ? 'bg-orange-500/20' : 'bg-cyan-500/20'}`} />
+        {/* Unified Dynamic Orbs */}
+        <div className="absolute top-1/4 left-1/4 w-96 h-96 rounded-full mix-blend-screen filter blur-[100px] animate-pulse transition-colors duration-700 bg-blue-500/30" />
+        <div className="absolute bottom-1/4 right-1/4 w-96 h-96 rounded-full mix-blend-screen filter blur-[100px] animate-pulse delay-1000 transition-colors duration-700 bg-cyan-500/20" />
       </div>
 
       {/* Top Controls */}
@@ -89,40 +84,14 @@ export default function LoginPage({ onBackClick, onRegisterClick, darkMode, togg
       <div className="relative z-10 w-full max-w-md bg-white/10 backdrop-blur-xl border border-white/20 p-8 rounded-3xl shadow-[0_8px_32px_0_rgba(0,0,0,0.4)] text-white transition-all duration-300">
         
         {/* Brand Header */}
-        <div className="flex flex-col items-center text-center mb-6">
+        <div className="flex flex-col items-center text-center mb-8">
           <div className="size-14 bg-white/10 border border-white/20 rounded-2xl flex items-center justify-center shadow-inner mb-4 transition-colors">
-            {loginType === 'admin' ? (
-               <ShieldCheck className="size-7 text-rose-400" />
-            ) : (
-               <Map className="size-7 text-white" />
-            )}
+             <Map className="size-7 text-white" />
           </div>
           <h1 className="text-3xl font-bold tracking-tight mb-1">SurveySync</h1>
           <p className="text-white/60 text-sm">
-            {loginType === 'admin' ? 'Secure Administrator Access' : 'Sign in to manage your survey projects.'}
+            Sign in to access your portal
           </p>
-        </div>
-
-        {/* --- THE ROLE TOGGLE --- */}
-        <div className="flex p-1 mb-8 bg-black/30 rounded-xl border border-white/10 backdrop-blur-md">
-          <button
-            type="button"
-            onClick={() => setLoginType('client')}
-            className={`flex-1 flex items-center justify-center gap-2 py-2.5 text-sm font-semibold rounded-lg transition-all duration-200 ${
-              loginType === 'client' ? 'bg-white text-slate-900 shadow-sm' : 'text-white/60 hover:text-white'
-            }`}
-          >
-            <User className="size-4" /> Client
-          </button>
-          <button
-            type="button"
-            onClick={() => setLoginType('admin')}
-            className={`flex-1 flex items-center justify-center gap-2 py-2.5 text-sm font-semibold rounded-lg transition-all duration-200 ${
-              loginType === 'admin' ? 'bg-white text-slate-900 shadow-sm' : 'text-white/60 hover:text-white'
-            }`}
-          >
-            <ShieldCheck className="size-4" /> Admin
-          </button>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-5">
@@ -138,7 +107,7 @@ export default function LoginPage({ onBackClick, onRegisterClick, darkMode, togg
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="w-full pl-10 pr-4 py-3 bg-black/20 border border-white/10 rounded-xl text-white placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-white/30 transition-all disabled:opacity-50"
-                placeholder={loginType === 'admin' ? "admin@surveysync.com" : "name@company.com"}
+                placeholder="name@example.com"
                 required
                 disabled={isLoading}
               />
@@ -208,24 +177,22 @@ export default function LoginPage({ onBackClick, onRegisterClick, darkMode, togg
                 Authenticating...
               </>
             ) : (
-              loginType === 'admin' ? 'Access Admin Portal' : 'Sign In as Client'
+              'Sign In'
             )}
           </button>
         </form>
 
-        {/* Registration Link (Hidden for Admins) */}
-        {loginType === 'client' && (
-          <div className="mt-8 text-center text-sm text-white/60 pt-6 border-t border-white/10">
-            Don't have an account?{' '}
-            <button 
-              onClick={onRegisterClick} 
-              className="text-white hover:text-blue-300 font-semibold hover:underline transition-colors" 
-              disabled={isLoading}
-            >
-              Register here
-            </button>
-          </div>
-        )}
+        {/* Registration Link */}
+        <div className="mt-8 text-center text-sm text-white/60 pt-6 border-t border-white/10">
+          Don't have an account?{' '}
+          <button 
+            onClick={onRegisterClick} 
+            className="text-white hover:text-blue-300 font-semibold hover:underline transition-colors" 
+            disabled={isLoading}
+          >
+            Register here
+          </button>
+        </div>
       </div>
     </div>
   );

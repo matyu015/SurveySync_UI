@@ -119,7 +119,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
       setAvailabilitySlots(getLocalCollection('availability'));
     });
 
-    // NEW: Listen for all documents
+    // Listen for all documents
     const unsubDocs = onSnapshot(collection(db, 'documents'), (snapshot) => {
       setDocuments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     }, (error) => {
@@ -143,7 +143,9 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
     }
   }, [selectedRequest]);
 
-  // --- HELPER: GET REAL CLIENT NAME ---
+  // --- HELPER FORMATTERS ---
+  const formatCurrency = (amount: number | string | undefined) => `PHP ${Number(amount || 0).toLocaleString()}`;
+
   const getClientName = (clientId: string, fallbackName: string) => {
     if (!clientId) return fallbackName;
     const clientUser = clients.find(c => c.id === clientId || c.uid === clientId);
@@ -171,7 +173,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
       id: p.id,
       type: 'payment',
       title: 'Payment Verification',
-      desc: `${getClientName(p.clientId, p.clientName)} submitted a payment of ₱${p.amount.toLocaleString()}`,
+      desc: `${getClientName(p.clientId, p.clientName)} submitted a payment of ${formatCurrency(p.amount)}`,
       date: p.createdAt || new Date().toISOString(),
       ref: p.referenceNo
     }))
@@ -255,7 +257,6 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
       alert("Failed to update status.");
     }
   };
-
 
   // --- ACTIONS ---
   const handleUpdateStatus = async (requestId: string, newStatus: string) => {
@@ -630,7 +631,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                     { label: 'Total Requests', value: requests.length, icon: FileText, color: 'bg-blue-500' },
                     { label: 'Pending Review', value: pendingRequests.length, icon: Clock, color: 'bg-warning' },
                     { label: 'Upcoming Surveys', value: requests.filter(r => r.scheduledDate).length, icon: CalendarIcon, color: 'bg-purple-500' },
-                    { label: 'Revenue', value: `₱${payments.filter(p => p.status === 'paid').reduce((sum, p) => sum + p.amount, 0).toLocaleString()}`, icon: PesoIcon, color: 'bg-success' }
+                    { label: 'Revenue', value: formatCurrency(payments.filter(p => p.status === 'paid').reduce((sum, p) => sum + p.amount, 0)), icon: PesoIcon, color: 'bg-success' }
                   ].map(stat => (
                     <div key={stat.label} className="bg-card p-6 rounded-xl border border-border">
                       <div className={`size-12 ${stat.color}/10 rounded-lg flex items-center justify-center mb-4`}>
@@ -718,7 +719,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                </div>
             )}
 
-            {/* --- DOCUMENTS TAB (NEW) --- */}
+            {/* --- DOCUMENTS TAB --- */}
             {activeTab === 'documents' && (
               <div className="space-y-6">
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
@@ -1047,8 +1048,8 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
               <div className="space-y-6">
                 <div className="grid md:grid-cols-3 gap-4">
                   {[
-                    { label: 'Total Collected', value: `₱${payments.filter(p => p.status === 'paid').reduce((sum, p) => sum + p.amount, 0).toLocaleString()}`, icon: CheckCircle2, color: 'bg-success' },
-                    { label: 'Pending Verification', value: `₱${payments.filter(p => p.status === 'pending').reduce((sum, p) => sum + p.amount, 0).toLocaleString()}`, icon: Clock, color: 'bg-warning' },
+                    { label: 'Total Collected', value: formatCurrency(payments.filter(p => p.status === 'paid').reduce((sum, p) => sum + p.amount, 0)), icon: CheckCircle2, color: 'bg-success' },
+                    { label: 'Pending Verification', value: formatCurrency(payments.filter(p => p.status === 'pending').reduce((sum, p) => sum + p.amount, 0)), icon: Clock, color: 'bg-warning' },
                     { label: 'Total Transactions', value: payments.length, icon: CreditCard, color: 'bg-blue-500' }
                   ].map(stat => (
                     <div key={stat.label} className="bg-card p-6 rounded-xl border border-border">
@@ -1080,7 +1081,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                           <tr key={payment.id} className="hover:bg-accent/50">
                             <td className="px-6 py-4 text-sm">{payment.referenceNo}</td>
                             <td className="px-6 py-4 text-sm text-muted-foreground">{payment.requestRef || payment.requestId || 'N/A'}</td>
-                            <td className="px-6 py-4 text-sm font-medium">₱{payment.amount.toLocaleString()}</td>
+                            <td className="px-6 py-4 text-sm font-medium">{formatCurrency(payment.amount)}</td>
                             <td className="px-6 py-4 text-sm uppercase">{payment.method}</td>
                             <td className="px-6 py-4 text-sm">{formatDate(payment.createdAt)}</td>
                             <td className="px-6 py-4">

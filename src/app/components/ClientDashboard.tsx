@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { LayoutDashboard, FileText, Calendar as CalendarIcon, LogOut, Search, Menu, Sun, Moon, Plus, Upload, Loader2, Map, X, CreditCard, Clock, CheckCircle2, Receipt, Wallet, Bell, FileCheck, XCircle } from 'lucide-react';
+import { LayoutDashboard, FileText, Calendar as CalendarIcon, LogOut, Search, Menu, Sun, Moon, Plus, Upload, Loader2, Map, X, CreditCard, Clock, CheckCircle2, Receipt, Wallet, Bell, FileCheck, XCircle, Edit } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { collection, query, where, onSnapshot, addDoc, updateDoc, doc } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
@@ -76,12 +76,15 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
   
   // Request Modal State
   const [isRequestModalOpen, setIsRequestModalOpen] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false); // NEW: Edit Modal
+  const [editingRequestId, setEditingRequestId] = useState<string | null>(null); // NEW: Tracking which request to edit
+  
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [surveyType, setSurveyType] = useState('Lot Plan / Relocation');
   const [location, setLocation] = useState('');
   const [notes, setNotes] = useState('');
   const [purpose, setPurpose] = useState('');
-  const [lotArea, setLotArea] = useState(''); // NEW: Added for AI Recommendation
+  const [lotArea, setLotArea] = useState(''); 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
   // Payment Modal State
@@ -214,6 +217,16 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
     }
   };
 
+  const resetFormState = () => {
+    setLocation('');
+    setNotes('');
+    setPurpose('');
+    setLotArea('');
+    setSurveyType('Lot Plan / Relocation');
+    setSelectedFile(null);
+    setEditingRequestId(null);
+  };
+
   // Submit Request + Optional File Attachment
   const handleSubmitRequest = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -244,7 +257,7 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
         propertyDetails: {
           address: { street: location, barangay: '', municipality: '', province: 'Bataan' },
           purpose: purpose || 'For survey processing',
-          lotArea: Number(lotArea) || 0, // NEW: Saves Lot Area
+          lotArea: Number(lotArea) || 0,
         },
       };
 
@@ -274,12 +287,7 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
       }
 
       setIsRequestModalOpen(false);
-      setLocation('');
-      setNotes('');
-      setPurpose('');
-      setLotArea('');
-      setSurveyType('Lot Plan / Relocation');
-      setSelectedFile(null);
+      resetFormState();
       setSelectedScheduleRequestId('');
       setActiveTab('requests');
 
@@ -291,7 +299,82 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
     }
   };
 
-  // --- NEW: Client Soft-Delete / Cancel Request Logic ---
+  // --- NEW: Client Edit Request Logic ---
+  const openEditModal = (request: any) => {
+    setEditingRequestId(request.id);
+    setSurveyType(request.surveyType || 'Lot Plan / Relocation');
+    setLocation(request.location || request.propertyDetails?.address?.street || '');
+    setPurpose(request.propertyDetails?.purpose || '');
+    setLotArea(String(request.propertyDetails?.lotArea || ''));
+    setNotes(request.notes || '');
+    setSelectedFile(null); // Clear any previous file selection
+    setIsEditModalOpen(true);
+  };
+
+  const handleUpdateRequest = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentUser || !editingRequestId) return;
+    if (selectedFile && selectedFile.size > 5 * 1024 * 1024) {
+      return alert("The attached file is too large. Maximum size is 5MB.");
+    }
+
+    setIsSubmitting(true);
+    try {
+      const amount = SURVEY_PRICES[surveyType] || 5500;
+      
+      await updateDoc(doc(db, 'requests', editingRequestId), {
+        surveyType,
+        location,
+        notes,
+        amount,
+        propertyDetails: {
+          address: { street: location, barangay: '', municipality: '', province: 'Bataan' },
+          purpose: purpose || 'For survey processing',
+          lotArea: Number(lotArea) || 0,
+        },
+        updatedAt: new Date().toISOString()
+      });
+
+      // Handle File Replacement
+      if (selectedFile) {
+        const fileName = `${currentUser.uid}/${Date.now()}_${selectedFile.name}`;
+        const { error: uploadError } = await supabase.storage.from('documents').upload(fileName, selectedFile);
+        
+        if (!uploadError) {
+          const { data: publicUrlData } = supabase.storage.from('documents').getPublicUrl(fileName);
+          const requestObj = requests.find(r => r.id === editingRequestId);
+          
+          await addDoc(collection(db, 'documents'), {
+            requestId: editingRequestId,
+            requestRef: requestObj?.referenceNo || editingRequestId, 
+            clientId: currentUser.uid,
+            clientName: currentUser.displayName || currentUser.email?.split('@')[0] || 'Client',
+            clientEmail: currentUser.email,
+            uploadedBy: 'client',
+            name: selectedFile.name,
+            fileUrl: publicUrlData.publicUrl,
+            status: 'under_review',
+            uploadedAt: new Date().toISOString(),
+            fileType: selectedFile.type,
+            fileSize: `${(selectedFile.size / (1024 * 1024)).toFixed(2)} MB`,
+            isReplacement: true // Flags this as a replaced document update
+          });
+        }
+      }
+
+      setIsEditModalOpen(false);
+      resetFormState();
+      alert("Request successfully updated!");
+
+    } catch (error) {
+      console.error("Error updating request:", error);
+      alert("Failed to update request.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // --- Client Soft-Delete / Cancel Request Logic ---
   const handleCancelRequest = async (requestId: string) => {
     if (!window.confirm("Are you sure you want to cancel this survey request?")) return;
     try {
@@ -363,7 +446,6 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
     try {
       let receiptUrl = '';
 
-      // Upload receipt to Supabase if provided
       if (paymentReceiptFile) {
         const fileName = `receipts/${currentUser.uid}_${Date.now()}_${paymentReceiptFile.name}`;
         const { error: uploadError } = await supabase.storage.from('documents').upload(fileName, paymentReceiptFile);
@@ -374,7 +456,6 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
         receiptUrl = publicUrlData.publicUrl;
       }
 
-      // Read simulated gateway inputs if GCash was used
       const gcashAccountNum = (document.getElementById('gcash-phone') as HTMLInputElement)?.value || '';
 
       await addDoc(collection(db, 'payments'), {
@@ -388,7 +469,7 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
         status: 'pending',
         referenceNo: paymentReference || makeReference(paymentMethod.toUpperCase()),
         receiptUrl: receiptUrl || null,
-        gcashNumber: paymentMethod === 'gcash' ? gcashAccountNum : null, // Records mobile trace
+        gcashNumber: paymentMethod === 'gcash' ? gcashAccountNum : null,
         createdAt: new Date().toISOString(),
       });
       
@@ -419,10 +500,10 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
   const scheduledRequests = [...requests].filter(r => r.scheduledDate).sort((a, b) => new Date(a.scheduledDate).getTime() - new Date(b.scheduledDate).getTime());
   const schedulableRequests = [...requests].filter(r => !r.scheduledDate && normalizeStatus(r.status) !== 'completed' && normalizeStatus(r.status) !== 'cancelled').sort((a, b) => new Date(b.submittedAt || b.createdAt || 0).getTime() - new Date(a.submittedAt || a.createdAt || 0).getTime());
   
-  // --- NEW: Strict Availability Slot Filtering ---
+  // --- Strict Availability Slot Filtering ---
   const today = new Date();
   const minAllowedDate = new Date(today);
-  minAllowedDate.setDate(today.getDate() + 3); // 3-day processing window
+  minAllowedDate.setDate(today.getDate() + 3); 
   minAllowedDate.setHours(0, 0, 0, 0);
 
   const availableSlots = [...availabilitySlots].filter(slot => {
@@ -432,10 +513,7 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
     const slotDate = new Date(slot.date);
     slotDate.setHours(0, 0, 0, 0);
     
-    // Condition 1: Exclude Sundays (0 is Sunday)
     if (slotDate.getDay() === 0) return false;
-    
-    // Condition 2: Enforce 3-day processing wait time (no past dates, no immediate dates)
     if (slotDate < minAllowedDate) return false;
     
     return true;
@@ -450,7 +528,6 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
     const unavailableCount = slots.filter(slot => slot.status === 'unavailable').length;
     const bookedCount = slots.filter(slot => slot.status === 'booked').length;
 
-    // Optional visual logic overlay for constraints
     const dateObj = new Date(dateKey);
     dateObj.setHours(0,0,0,0);
     if (dateObj.getDay() === 0 || dateObj < minAllowedDate) {
@@ -632,7 +709,7 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
                   <p className="text-muted-foreground text-sm">Track survey progress, payment verification, and field schedules.</p>
                 </div>
                 <button
-                  onClick={() => setIsRequestModalOpen(true)}
+                  onClick={() => { resetFormState(); setIsRequestModalOpen(true); }}
                   className="flex items-center justify-center gap-2 bg-primary text-primary-foreground px-4 py-2.5 rounded-lg text-sm font-medium hover:opacity-90 transition-opacity"
                 >
                   <Plus className="size-4" /> New Request
@@ -719,7 +796,7 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
                   <p className="text-sm text-muted-foreground">Requests submitted here appear in the admin dashboard.</p>
                 </div>
                 <button
-                  onClick={() => setIsRequestModalOpen(true)}
+                  onClick={() => { resetFormState(); setIsRequestModalOpen(true); }}
                   className="flex items-center justify-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-lg text-sm font-medium hover:opacity-90 transition-opacity"
                 >
                   <Plus className="size-4" /> New Request
@@ -787,14 +864,22 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
                             </button>
                           )}
 
-                          {/* Client Request Cancellation (Soft Delete) */}
+                          {/* Client Request Edit & Cancellation */}
                           {isUnderReview && (
-                            <button
-                              onClick={() => handleCancelRequest(request.id)}
-                              className="inline-flex items-center justify-center gap-2 px-4 py-2 border border-red-500/30 text-red-500 bg-red-500/5 hover:bg-red-500/10 rounded-lg text-sm font-medium transition-colors w-full sm:w-auto mt-2"
-                            >
-                              <XCircle className="size-4" /> Cancel Request
-                            </button>
+                            <div className="flex gap-2 w-full sm:w-auto mt-2">
+                              <button
+                                onClick={() => openEditModal(request)}
+                                className="flex-1 sm:flex-none inline-flex items-center justify-center gap-2 px-4 py-2 border border-blue-500/30 text-blue-500 bg-blue-500/5 hover:bg-blue-500/10 rounded-lg text-sm font-medium transition-colors"
+                              >
+                                <Edit className="size-4" /> Edit
+                              </button>
+                              <button
+                                onClick={() => handleCancelRequest(request.id)}
+                                className="flex-1 sm:flex-none inline-flex items-center justify-center gap-2 px-4 py-2 border border-red-500/30 text-red-500 bg-red-500/5 hover:bg-red-500/10 rounded-lg text-sm font-medium transition-colors"
+                              >
+                                <XCircle className="size-4" /> Cancel
+                              </button>
+                            </div>
                           )}
                         </div>
                       </div>
@@ -1098,7 +1183,7 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
                 New Survey Request
               </h2>
               <button
-                onClick={() => setIsRequestModalOpen(false)}
+                onClick={() => { setIsRequestModalOpen(false); resetFormState(); }}
                 className="text-muted-foreground hover:text-foreground transition-colors p-1.5 rounded-lg hover:bg-accent"
               >
                 <X className="size-5" />
@@ -1198,7 +1283,7 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
               <div className="pt-2 sm:pt-4 flex gap-3">
                 <button
                   type="button"
-                  onClick={() => setIsRequestModalOpen(false)}
+                  onClick={() => { setIsRequestModalOpen(false); resetFormState(); }}
                   className="flex-1 px-4 py-3 bg-accent hover:bg-accent/80 text-foreground rounded-xl font-medium transition-colors"
                 >
                   Cancel
@@ -1215,6 +1300,137 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
                     </>
                   ) : (
                     'Submit Request'
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* --- EDIT REQUEST MODAL --- */}
+      {isEditModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm">
+          <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-xl overflow-hidden max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between p-4 sm:p-6 border-b border-border bg-blue-500/5">
+              <h2 className="text-lg sm:text-xl font-bold flex items-center gap-2 text-blue-600 dark:text-blue-400">
+                <Edit className="size-5" />
+                Edit Pending Request
+              </h2>
+              <button
+                onClick={() => { setIsEditModalOpen(false); resetFormState(); }}
+                className="text-muted-foreground hover:text-foreground transition-colors p-1.5 rounded-lg hover:bg-accent"
+              >
+                <X className="size-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleUpdateRequest} className="p-4 sm:p-6 space-y-4 sm:space-y-5 overflow-y-auto">
+              <div className="grid sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium mb-1.5">Type of Survey</label>
+                  <select
+                    value={surveyType}
+                    onChange={(e) => setSurveyType(e.target.value)}
+                    className="w-full px-4 py-3 bg-input-background border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/50 transition-shadow"
+                  >
+                    <option value="Lot Plan / Relocation">Lot Plan / Relocation</option>
+                    <option value="Topographic Survey">Topographic Survey</option>
+                    <option value="Subdivision Survey">Subdivision Survey</option>
+                    <option value="Consolidation Survey">Consolidation Survey</option>
+                  </select>
+                  <p className="mt-1 text-xs text-muted-foreground">Estimated fee: {formatCurrency(SURVEY_PRICES[surveyType])}</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1.5">Lot Area (sqm)</label>
+                  <input
+                    type="number"
+                    min="1"
+                    required
+                    value={lotArea}
+                    onChange={(e) => setLotArea(e.target.value)}
+                    className="w-full px-4 py-3 bg-input-background border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/50 placeholder:text-muted-foreground transition-shadow"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1.5">Property Location (Bataan)</label>
+                <input
+                  type="text"
+                  required
+                  value={location}
+                  onChange={(e) => setLocation(e.target.value)}
+                  className="w-full px-4 py-3 bg-input-background border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/50 placeholder:text-muted-foreground transition-shadow"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1.5">Purpose</label>
+                <input
+                  type="text"
+                  value={purpose}
+                  onChange={(e) => setPurpose(e.target.value)}
+                  className="w-full px-4 py-3 bg-input-background border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/50 placeholder:text-muted-foreground transition-shadow"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1.5">Additional Details (Optional)</label>
+                <textarea
+                  rows={3}
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  className="w-full px-4 py-3 bg-input-background border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/50 placeholder:text-muted-foreground resize-none transition-shadow"
+                />
+              </div>
+
+              <div className="border-t border-border pt-4">
+                <label className="block text-sm font-medium mb-1.5">Replace Document (Optional)</label>
+                <div className={`border-2 border-dashed rounded-xl p-4 text-center transition-colors ${selectedFile ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50 bg-input-background'}`}>
+                  <input
+                    type="file"
+                    id="edit-file"
+                    onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
+                    className="hidden"
+                    accept=".pdf,.jpg,.jpeg,.png"
+                  />
+                  {selectedFile ? (
+                    <div className="flex flex-col items-center gap-2">
+                      <FileText className="size-6 text-primary" />
+                      <span className="text-sm font-medium text-foreground truncate max-w-full px-4">{selectedFile.name}</span>
+                      <label htmlFor="edit-file" className="text-xs text-primary hover:underline cursor-pointer">Replace file</label>
+                    </div>
+                  ) : (
+                    <label htmlFor="edit-file" className="flex flex-col items-center cursor-pointer gap-2">
+                      <Upload className="size-6 text-muted-foreground" />
+                      <span className="text-sm font-medium">Upload new requirement to overwrite</span>
+                      <span className="text-xs text-muted-foreground">Leaves original file if empty (Max 5MB)</span>
+                    </label>
+                  )}
+                </div>
+              </div>
+
+              <div className="pt-2 sm:pt-4 flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => { setIsEditModalOpen(false); resetFormState(); }}
+                  className="flex-1 px-4 py-3 bg-accent hover:bg-accent/80 text-foreground rounded-xl font-medium transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="flex-1 flex justify-center items-center gap-2 px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+                >
+                  {isSubmitting ? (
+                    <>
+                      <Loader2 className="size-5 animate-spin" />
+                      Updating...
+                    </>
+                  ) : (
+                    'Save Changes'
                   )}
                 </button>
               </div>

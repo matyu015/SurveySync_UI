@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { LayoutDashboard, FileText, Calendar as CalendarIcon, LogOut, Search, Menu, Sun, Moon, Plus, Upload, Loader2, Map, X, CreditCard, Clock, CheckCircle2, Receipt, Wallet, Bell, FileCheck } from 'lucide-react';
+import { LayoutDashboard, FileText, Calendar as CalendarIcon, LogOut, Search, Menu, Sun, Moon, Plus, Upload, Loader2, Map, X, CreditCard, Clock, CheckCircle2, Receipt, Wallet, Bell, FileCheck, XCircle } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { collection, query, where, onSnapshot, addDoc, updateDoc, doc } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
@@ -81,6 +81,7 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
   const [location, setLocation] = useState('');
   const [notes, setNotes] = useState('');
   const [purpose, setPurpose] = useState('');
+  const [lotArea, setLotArea] = useState(''); // NEW: Added for AI Recommendation
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
   // Payment Modal State
@@ -89,7 +90,7 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('gcash');
   const [paymentReference, setPaymentReference] = useState('');
   const [paymentAmount, setPaymentAmount] = useState('');
-  const [paymentReceiptFile, setPaymentReceiptFile] = useState<File | null>(null); // NEW: State for receipt image
+  const [paymentReceiptFile, setPaymentReceiptFile] = useState<File | null>(null);
   const [isPaying, setIsPaying] = useState(false);
   
   const [isBookingSchedule, setIsBookingSchedule] = useState(false);
@@ -217,7 +218,6 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
   const handleSubmitRequest = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser) return alert("Please log in to submit a request.");
-
     if (selectedFile && selectedFile.size > 5 * 1024 * 1024) {
       return alert("The attached file is too large. Maximum size is 5MB.");
     }
@@ -244,6 +244,7 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
         propertyDetails: {
           address: { street: location, barangay: '', municipality: '', province: 'Bataan' },
           purpose: purpose || 'For survey processing',
+          lotArea: Number(lotArea) || 0, // NEW: Saves Lot Area
         },
       };
 
@@ -276,6 +277,7 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
       setLocation('');
       setNotes('');
       setPurpose('');
+      setLotArea('');
       setSurveyType('Lot Plan / Relocation');
       setSelectedFile(null);
       setSelectedScheduleRequestId('');
@@ -286,6 +288,18 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
       alert("Failed to submit request.");
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  // --- NEW: Client Soft-Delete / Cancel Request Logic ---
+  const handleCancelRequest = async (requestId: string) => {
+    if (!window.confirm("Are you sure you want to cancel this survey request?")) return;
+    try {
+      await updateDoc(doc(db, 'requests', requestId), { status: 'cancelled' });
+      alert("Request cancelled successfully.");
+    } catch (error) {
+      console.error("Error cancelling request:", error);
+      alert("Failed to cancel request.");
     }
   };
 
@@ -334,7 +348,7 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
     }
   };
 
-  // Submit Payment + Supabase Image Upload
+  // Submit Payment + Supabase Image Upload + GCash Data
   const handleSubmitPayment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser || !selectedPaymentRequest) return;
@@ -360,6 +374,9 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
         receiptUrl = publicUrlData.publicUrl;
       }
 
+      // Read simulated gateway inputs if GCash was used
+      const gcashAccountNum = (document.getElementById('gcash-phone') as HTMLInputElement)?.value || '';
+
       await addDoc(collection(db, 'payments'), {
         requestId: selectedPaymentRequest.id,
         requestRef: selectedPaymentRequest.referenceNo || selectedPaymentRequest.id,
@@ -371,6 +388,7 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
         status: 'pending',
         referenceNo: paymentReference || makeReference(paymentMethod.toUpperCase()),
         receiptUrl: receiptUrl || null,
+        gcashNumber: paymentMethod === 'gcash' ? gcashAccountNum : null, // Records mobile trace
         createdAt: new Date().toISOString(),
       });
       
@@ -379,6 +397,7 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
       setSelectedPaymentRequest(null);
       setPaymentReceiptFile(null);
       setActiveTab('payments');
+      if (paymentMethod === 'gcash') alert("GCash simulated transaction processed successfully and forwarded for verification!");
     } catch (error) {
       console.error("Payment submission failed:", error);
       alert("Failed to submit payment.");
@@ -398,8 +417,30 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
 
   const sortedRequests = [...filteredRequests].sort((a, b) => new Date(b.submittedAt || b.createdAt || 0).getTime() - new Date(a.submittedAt || a.createdAt || 0).getTime());
   const scheduledRequests = [...requests].filter(r => r.scheduledDate).sort((a, b) => new Date(a.scheduledDate).getTime() - new Date(b.scheduledDate).getTime());
-  const schedulableRequests = [...requests].filter(r => !r.scheduledDate && normalizeStatus(r.status) !== 'completed').sort((a, b) => new Date(b.submittedAt || b.createdAt || 0).getTime() - new Date(a.submittedAt || a.createdAt || 0).getTime());
-  const availableSlots = [...availabilitySlots].filter(slot => slot.status === 'available').sort((a, b) => `${a.date || ''}T${a.startTime || '00:00'}`.localeCompare(`${b.date || ''}T${b.startTime || '00:00'}`));
+  const schedulableRequests = [...requests].filter(r => !r.scheduledDate && normalizeStatus(r.status) !== 'completed' && normalizeStatus(r.status) !== 'cancelled').sort((a, b) => new Date(b.submittedAt || b.createdAt || 0).getTime() - new Date(a.submittedAt || a.createdAt || 0).getTime());
+  
+  // --- NEW: Strict Availability Slot Filtering ---
+  const today = new Date();
+  const minAllowedDate = new Date(today);
+  minAllowedDate.setDate(today.getDate() + 3); // 3-day processing window
+  minAllowedDate.setHours(0, 0, 0, 0);
+
+  const availableSlots = [...availabilitySlots].filter(slot => {
+    if (slot.status !== 'available') return false;
+    if (!slot.date) return false;
+    
+    const slotDate = new Date(slot.date);
+    slotDate.setHours(0, 0, 0, 0);
+    
+    // Condition 1: Exclude Sundays (0 is Sunday)
+    if (slotDate.getDay() === 0) return false;
+    
+    // Condition 2: Enforce 3-day processing wait time (no past dates, no immediate dates)
+    if (slotDate < minAllowedDate) return false;
+    
+    return true;
+  }).sort((a, b) => `${a.date || ''}T${a.startTime || '00:00'}`.localeCompare(`${b.date || ''}T${b.startTime || '00:00'}`));
+
   const selectedDateAvailableSlots = availableSlots.filter(slot => slot.date === selectedCalendarDate);
 
   const getClientDayState = (dateKey: string) => {
@@ -409,6 +450,13 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
     const unavailableCount = slots.filter(slot => slot.status === 'unavailable').length;
     const bookedCount = slots.filter(slot => slot.status === 'booked').length;
 
+    // Optional visual logic overlay for constraints
+    const dateObj = new Date(dateKey);
+    dateObj.setHours(0,0,0,0);
+    if (dateObj.getDay() === 0 || dateObj < minAllowedDate) {
+       return { status: 'unavailable' as const, label: 'Not Allowed' };
+    }
+
     if (scheduledCount) return { status: 'scheduled' as const, label: `${scheduledCount} scheduled` };
     if (availableCount) return { status: 'available' as const, label: `${availableCount} open` };
     if (unavailableCount && !bookedCount) return { status: 'unavailable' as const, label: 'Unavailable' };
@@ -416,7 +464,7 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
     return undefined;
   };
 
-  const pendingPayments = requests.filter(request => request.paymentStatus !== 'paid');
+  const pendingPayments = requests.filter(request => request.paymentStatus !== 'paid' && request.status !== 'cancelled');
   const verifiedPayments = payments.filter(payment => payment.status === 'paid');
   const pendingPaymentAmount = payments.filter(payment => payment.status === 'pending').reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
 
@@ -434,7 +482,7 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
       case 'scheduled': case 'field_survey': return 'bg-blue-500/10 text-blue-600 border-blue-500/20';
       case 'submitted': case 'pending': return 'bg-amber-500/10 text-amber-600 border-amber-500/20';
       case 'under_review': case 'partial': return 'bg-purple-500/10 text-purple-600 border-purple-500/20';
-      case 'rejected': return 'bg-red-500/10 text-red-600 border-red-500/20';
+      case 'rejected': case 'cancelled': return 'bg-red-500/10 text-red-600 border-red-500/20';
       default: return 'bg-gray-500/10 text-gray-600 border-gray-500/20';
     }
   };
@@ -681,6 +729,7 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
               <div className="grid gap-4">
                 {sortedRequests.map((request) => {
                   const officialResult = adminUploads.find(doc => doc.requestId === request.id);
+                  const isUnderReview = normalizeStatus(request.status) === 'under_review' || normalizeStatus(request.status) === 'submitted';
 
                   return (
                     <div key={request.id} className="bg-card border border-border rounded-xl p-5 shadow-sm">
@@ -721,7 +770,7 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
 
                           <button
                             onClick={() => openSchedulePicker(request)}
-                            disabled={Boolean(request.scheduledDate)}
+                            disabled={Boolean(request.scheduledDate) || request.status === 'cancelled'}
                             className="inline-flex items-center justify-center gap-2 px-4 py-2 border border-border rounded-lg text-sm font-medium hover:bg-accent disabled:opacity-50 disabled:cursor-not-allowed w-full sm:w-auto"
                           >
                             <CalendarIcon className="size-4" />
@@ -729,12 +778,22 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
                           </button>
                           
                           {/* Only show pay button if it's not paid yet */}
-                          {request.paymentStatus !== 'paid' && (
+                          {request.paymentStatus !== 'paid' && request.status !== 'cancelled' && (
                             <button
                               onClick={() => openPaymentModal(request)}
                               className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:opacity-90 w-full sm:w-auto"
                             >
                               <CreditCard className="size-4" /> Pay / Submit Proof
+                            </button>
+                          )}
+
+                          {/* Client Request Cancellation (Soft Delete) */}
+                          {isUnderReview && (
+                            <button
+                              onClick={() => handleCancelRequest(request.id)}
+                              className="inline-flex items-center justify-center gap-2 px-4 py-2 border border-red-500/30 text-red-500 bg-red-500/5 hover:bg-red-500/10 rounded-lg text-sm font-medium transition-colors w-full sm:w-auto mt-2"
+                            >
+                              <XCircle className="size-4" /> Cancel Request
                             </button>
                           )}
                         </div>
@@ -1047,19 +1106,33 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
             </div>
 
             <form onSubmit={handleSubmitRequest} className="p-4 sm:p-6 space-y-4 sm:space-y-5 overflow-y-auto">
-              <div>
-                <label className="block text-sm font-medium mb-1.5">Type of Survey</label>
-                <select
-                  value={surveyType}
-                  onChange={(e) => setSurveyType(e.target.value)}
-                  className="w-full px-4 py-3 bg-input-background border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/50 transition-shadow"
-                >
-                  <option value="Lot Plan / Relocation">Lot Plan / Relocation</option>
-                  <option value="Topographic Survey">Topographic Survey</option>
-                  <option value="Subdivision Survey">Subdivision Survey</option>
-                  <option value="Consolidation Survey">Consolidation Survey</option>
-                </select>
-                <p className="mt-1 text-xs text-muted-foreground">Estimated fee: {formatCurrency(SURVEY_PRICES[surveyType])}</p>
+              <div className="grid sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium mb-1.5">Type of Survey</label>
+                  <select
+                    value={surveyType}
+                    onChange={(e) => setSurveyType(e.target.value)}
+                    className="w-full px-4 py-3 bg-input-background border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/50 transition-shadow"
+                  >
+                    <option value="Lot Plan / Relocation">Lot Plan / Relocation</option>
+                    <option value="Topographic Survey">Topographic Survey</option>
+                    <option value="Subdivision Survey">Subdivision Survey</option>
+                    <option value="Consolidation Survey">Consolidation Survey</option>
+                  </select>
+                  <p className="mt-1 text-xs text-muted-foreground">Estimated fee: {formatCurrency(SURVEY_PRICES[surveyType])}</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1.5">Lot Area (sqm)</label>
+                  <input
+                    type="number"
+                    min="1"
+                    required
+                    placeholder="e.g., 250"
+                    value={lotArea}
+                    onChange={(e) => setLotArea(e.target.value)}
+                    className="w-full px-4 py-3 bg-input-background border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/50 placeholder:text-muted-foreground transition-shadow"
+                  />
+                </div>
               </div>
 
               <div>
@@ -1268,7 +1341,42 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
                 </div>
               </div>
 
-              {/* NEW UPLOAD RECEIPT SECTION */}
+              {/* INTERACTIVE GCASH GATEWAY SIMULATOR */}
+              {paymentMethod === 'gcash' && (
+                <div className="border border-blue-200 bg-blue-50/50 dark:bg-blue-950/20 rounded-xl p-4 sm:p-5 space-y-4">
+                  <div className="flex items-center justify-between border-b border-blue-100 pb-2">
+                    <span className="text-xs font-bold uppercase tracking-wider text-blue-600">Secure GCash Portal</span>
+                    <span className="text-xs font-medium text-muted-foreground">Sandbox Environment</span>
+                  </div>
+
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block text-xs font-semibold mb-1 text-slate-700 dark:text-slate-300">GCash Mobile Number</label>
+                      <div className="relative">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-medium text-slate-400">+63</span>
+                        <input
+                          type="tel"
+                          id="gcash-phone"
+                          maxLength={10}
+                          placeholder="9171234567"
+                          className="w-full pl-12 pr-4 py-2.5 bg-background border border-blue-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm font-medium"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="p-3 bg-blue-100/50 dark:bg-blue-950/40 rounded-lg text-xs text-blue-800 dark:text-blue-300 space-y-1">
+                      <p className="font-semibold">💡 Presentation Flow Tips:</p>
+                      <ul className="list-disc pl-4 space-y-0.5">
+                        <li>Enter your target account mobile signature.</li>
+                        <li>The system automatically generates a dynamic secure fallback token.</li>
+                        <li>Attach the optional screenshot graphic below to fulfill defense tracking.</li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* UPLOAD RECEIPT SECTION */}
               <div className="border-t border-border pt-4">
                 <label className="block text-sm font-medium mb-1.5">Upload Receipt (Optional but recommended)</label>
                 <div className={`border-2 border-dashed rounded-xl p-4 text-center transition-colors ${paymentReceiptFile ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50 bg-input-background'}`}>

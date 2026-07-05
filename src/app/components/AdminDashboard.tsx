@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Map, LayoutDashboard, FileText, Calendar as CalendarIcon, Users, FileCheck, CreditCard, BarChart3, Settings, LogOut, Moon, Sun, Search, Filter, Download, ChevronLeft, ChevronRight, CheckCircle2, XCircle, X, Clock, AlertCircle, TrendingUp, Loader2, Trash2, ExternalLink, Bell, Edit, Menu, Upload } from 'lucide-react';
+import { Map, LayoutDashboard, FileText, Calendar as CalendarIcon, Users, FileCheck, CreditCard, BarChart3, Settings, LogOut, Moon, Sun, Search, Filter, Download, ChevronLeft, ChevronRight, CheckCircle2, XCircle, X, Clock, AlertCircle, TrendingUp, Loader2, Trash2, ExternalLink, Bell, Edit, Menu, Upload, Sparkles } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line } from 'recharts';
 import { useAuth } from '../context/AuthContext';
 import { SURVEY_TYPES, BARANGAYS, mockPayments, mockRequests, mockUsers } from '../data/mockData';
@@ -35,6 +35,26 @@ const SurveySyncLogo = ({ className = "size-8" }) => (
   </svg>
 );
 
+// --- AI PERSONNEL RECOMMENDER ---
+const recommendPersonnel = (lotAreaSqm: number, surveyType: string) => {
+  const team = [
+    { role: "Geodetic Engineer", req: 1, staff: "Cris I. Mamaradlo" },
+    { role: "Driver", req: 1, staff: "Roger Valdez / Jesus Castillo" }
+  ];
+
+  if (lotAreaSqm < 1000 && surveyType === 'Lot Plan / Relocation') {
+    team.push({ role: "Instrument/Rod Man", req: 1, staff: "Jerome Gragasin / Arcie Dizon" });
+    team.push({ role: "Chief of Surveys", req: 1, staff: "Marlon Mamaradlo" });
+  } else {
+    team.push({ role: "RTK Operator", req: 1, staff: "Aeron Dizon / Jonathan Pablo" });
+    team.push({ role: "Instrument/Rod Man", req: 2, staff: "Jerome Gragasin / Wilson Mamaradlo" });
+    team.push({ role: "Chief of Surveys", req: 1, staff: "Gilbert Gumangan" });
+  }
+
+  team.push({ role: "CADD / eSurvey", req: 1, staff: "Erickson Isles" });
+  return team;
+};
+
 interface AdminDashboardProps {
   onLogout: () => void;
   darkMode: boolean;
@@ -67,7 +87,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
   const [isUpdating, setIsUpdating] = useState(false);
   const [isEditingSchedule, setIsEditingSchedule] = useState(false);
   
-  // Receipt Modal State (NEW)
+  // Receipt Modal State 
   const [selectedReceipt, setSelectedReceipt] = useState<string | null>(null);
 
   // Schedule Form State
@@ -146,6 +166,9 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
     }
   }, [selectedRequest]);
 
+  // --- FILTER OUT ARCHIVED (SOFT DELETED) REQUESTS ---
+  const activeRequests = requests.filter(r => !r.isArchived);
+
   // --- HELPER FORMATTERS ---
   const formatCurrency = (amount: number | string | undefined) => `PHP ${Number(amount || 0).toLocaleString()}`;
 
@@ -159,7 +182,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
   };
 
   // --- NOTIFICATION LOGIC ---
-  const pendingRequests = requests.filter(r => r.status === 'submitted' || r.status === 'under_review');
+  const pendingRequests = activeRequests.filter(r => r.status === 'submitted' || r.status === 'under_review');
   const pendingPaymentList = payments.filter(p => p.status === 'pending');
   const totalNotifications = pendingRequests.length + pendingPaymentList.length;
 
@@ -186,7 +209,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
     setShowNotifications(false);
     if (item.type === 'request') {
       setActiveTab('requests');
-      const req = requests.find(r => r.id === item.id);
+      const req = activeRequests.find(r => r.id === item.id);
       if (req) setSelectedRequest(req);
     } else if (item.type === 'payment') {
       setActiveTab('payments');
@@ -212,7 +235,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
 
     setIsUploadingDoc(true);
     try {
-      const selectedReq = requests.find(r => r.id === uploadDocRequestId);
+      const selectedReq = activeRequests.find(r => r.id === uploadDocRequestId);
       if (!selectedReq) throw new Error("Request not found");
 
       const fileName = `admin_uploads/${Date.now()}_${file.name}`;
@@ -261,7 +284,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
     }
   };
 
-  // --- ACTIONS ---
+  // --- ACTIONS (WITH SOFT DELETE) ---
   const handleUpdateStatus = async (requestId: string, newStatus: string) => {
     setIsUpdating(true);
     try {
@@ -307,17 +330,18 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
     }
   };
 
+  // --- NEW: SOFT DELETE (ARCHIVING) ---
   const handleDeleteRequest = async (requestId: string) => {
-    if (!window.confirm("Are you sure you want to delete this request? This cannot be undone.")) return;
+    if (!window.confirm("Are you sure you want to archive this request? It will be safely retained in the database but removed from active queues.")) return;
     try {
       if (requestId.startsWith('local-')) {
-        deleteLocalDoc('requests', requestId);
+        updateLocalDoc('requests', requestId, { status: 'cancelled', isArchived: true });
       } else {
-        await deleteDoc(doc(db, 'requests', requestId));
+        await updateDoc(doc(db, 'requests', requestId), { status: 'cancelled', isArchived: true });
       }
       setSelectedRequest(null);
     } catch (error) {
-      console.error("Error deleting request:", error);
+      console.error("Error archiving request:", error);
     }
   };
 
@@ -360,9 +384,24 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
     }
   };
 
+  // --- STRICT CALENDAR ENFORCEMENT ---
   const handleAddAvailability = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!availabilityDate || !availabilityStartTime || !availabilityEndTime) return;
+
+    // Check rules: Sunday & Minimum processing days
+    const selectedDateObj = new Date(availabilityDate);
+    const todayObj = new Date();
+    const minAllowedObj = new Date(todayObj);
+    minAllowedObj.setDate(todayObj.getDate() + 3);
+    minAllowedObj.setHours(0, 0, 0, 0);
+
+    if (selectedDateObj.getDay() === 0) {
+      return alert("Scheduling on Sundays is not allowed as it is a rest day.");
+    }
+    if (selectedDateObj < minAllowedObj) {
+      return alert("You must allow at least a 3-day processing window for new schedules.");
+    }
 
     setIsSavingAvailability(true);
     try {
@@ -384,6 +423,20 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
   };
 
   const handleSetDateAvailability = async (dateKey: string, status: 'available' | 'unavailable') => {
+    // Check rules for direct selection
+    const selectedDateObj = new Date(dateKey);
+    const todayObj = new Date();
+    const minAllowedObj = new Date(todayObj);
+    minAllowedObj.setDate(todayObj.getDate() + 3);
+    minAllowedObj.setHours(0, 0, 0, 0);
+
+    if (selectedDateObj.getDay() === 0) {
+      return alert("Scheduling on Sundays is not allowed as it is a rest day.");
+    }
+    if (selectedDateObj < minAllowedObj) {
+      return alert("You must allow at least a 3-day processing window for new schedules.");
+    }
+
     setAvailabilityDate(dateKey);
     setIsSavingAvailability(true);
     try {
@@ -463,7 +516,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
 
   const getAdminDayState = (dateKey: string) => {
     const slots = availabilitySlots.filter(slot => slot.date === dateKey);
-    const scheduledCount = requests.filter(request => request.scheduledDate === dateKey).length;
+    const scheduledCount = activeRequests.filter(request => request.scheduledDate === dateKey).length;
     const availableCount = slots.filter(slot => slot.status === 'available').length;
     const unavailableCount = slots.filter(slot => slot.status === 'unavailable').length;
     const bookedCount = slots.filter(slot => slot.status === 'booked').length;
@@ -484,6 +537,11 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
       </div>
     );
   }
+
+  // Determine dynamic strict minimum date for the Date inputs
+  const dynamicMinDate = new Date();
+  dynamicMinDate.setDate(dynamicMinDate.getDate() + 3);
+  const minDateStr = dynamicMinDate.toISOString().split('T')[0];
 
   return (
     <div className={darkMode ? 'dark' : ''}>
@@ -631,9 +689,9 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
               <div className="space-y-6">
                 <div className="grid md:grid-cols-4 gap-4">
                   {[
-                    { label: 'Total Requests', value: requests.length, icon: FileText, color: 'bg-blue-500' },
+                    { label: 'Total Requests', value: activeRequests.length, icon: FileText, color: 'bg-blue-500' },
                     { label: 'Pending Review', value: pendingRequests.length, icon: Clock, color: 'bg-warning' },
-                    { label: 'Upcoming Surveys', value: requests.filter(r => r.scheduledDate).length, icon: CalendarIcon, color: 'bg-purple-500' },
+                    { label: 'Upcoming Surveys', value: activeRequests.filter(r => r.scheduledDate).length, icon: CalendarIcon, color: 'bg-purple-500' },
                     { label: 'Revenue', value: formatCurrency(payments.filter(p => p.status === 'paid').reduce((sum, p) => sum + p.amount, 0)), icon: PesoIcon, color: 'bg-success' }
                   ].map(stat => (
                     <div key={stat.label} className="bg-card p-6 rounded-xl border border-border">
@@ -660,7 +718,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-border">
-                        {requests.slice(0, 8).map(request => (
+                        {activeRequests.slice(0, 8).map(request => (
                           <tr key={request.id} className="hover:bg-accent/30 transition-colors">
                             <td className="px-6 py-4 text-sm font-medium">{request.referenceNo}</td>
                             <td className="px-6 py-4 text-sm">{getClientName(request.clientId, request.clientName)}</td>
@@ -701,7 +759,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                         </tr>
                      </thead>
                      <tbody className="divide-y divide-border">
-                        {requests.map(request => (
+                        {activeRequests.map(request => (
                            <tr key={request.id} className="hover:bg-accent/30 transition-colors">
                               <td className="px-6 py-4 text-sm">{formatDate(request.submittedAt)}</td>
                               <td className="px-6 py-4 text-sm">{request.referenceNo}</td>
@@ -783,8 +841,11 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                                 </thead>
                                 <tbody className="divide-y divide-border">
                                   {clientRequests.map(req => (
-                                    <tr key={req.id} className="hover:bg-accent/30 transition-colors">
-                                      <td className="px-5 py-3 font-medium text-foreground">{req.referenceNo}</td>
+                                    <tr key={req.id} className={`transition-colors ${req.isArchived ? 'bg-red-500/5' : 'hover:bg-accent/30'}`}>
+                                      <td className="px-5 py-3 font-medium text-foreground">
+                                        {req.referenceNo} 
+                                        {req.isArchived && <span className="ml-2 text-[10px] bg-red-500 text-white px-2 py-0.5 rounded-full">Archived</span>}
+                                      </td>
                                       <td className="px-5 py-3">{req.surveyType}</td>
                                       <td className="px-5 py-3 text-muted-foreground">{formatDate(req.submittedAt || req.createdAt)}</td>
                                       <td className="px-5 py-3">
@@ -849,7 +910,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                           className="w-full px-3 py-2 bg-input-background border border-border rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary"
                         >
                           <option value="">-- Select Scheduled/Completed Request --</option>
-                          {requests.filter(r => r.status === 'scheduled' || r.status === 'field_survey' || r.status === 'completed').map(r => (
+                          {activeRequests.filter(r => r.status === 'scheduled' || r.status === 'field_survey' || r.status === 'completed').map(r => (
                             <option key={r.id} value={r.id}>
                               {r.referenceNo} - {getClientName(r.clientId, r.clientName)}
                             </option>
@@ -983,6 +1044,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                           <label className="block text-sm font-medium mb-1.5">Selected Date</label>
                           <input
                             type="date"
+                            min={minDateStr} // Enforces 3-day restriction on the native input
                             value={availabilityDate}
                             onChange={(e) => setAvailabilityDate(e.target.value)}
                             className="w-full px-3 py-2 bg-input-background border border-border rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary"
@@ -1114,7 +1176,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                         <h3 className="font-semibold">Booked Field Surveys</h3>
                       </div>
                       <div className="divide-y divide-border">
-                        {requests
+                        {activeRequests
                           .filter(r => r.scheduledDate)
                           .sort((a, b) => new Date(a.scheduledDate).getTime() - new Date(b.scheduledDate).getTime())
                           .map(request => (
@@ -1137,7 +1199,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                               </button>
                            </div>
                         ))}
-                        {requests.filter(r => r.scheduledDate).length === 0 && (
+                        {activeRequests.filter(r => r.scheduledDate).length === 0 && (
                            <div className="text-center p-10 text-muted-foreground">No booked surveys yet.</div>
                         )}
                       </div>
@@ -1203,7 +1265,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                                   </button>
                                 )}
                                 
-                                {/* New Receipt Viewer Button */}
+                                {/* Receipt Viewer Button */}
                                 {payment.receiptUrl ? (
                                   <button 
                                     onClick={() => setSelectedReceipt(payment.receiptUrl)}
@@ -1328,6 +1390,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                           <div className="flex flex-col sm:flex-row gap-4">
                              <input 
                                 type="date" 
+                                min={minDateStr} // Enforces 3-day buffer on manual edits
                                 value={scheduleDate}
                                 onChange={(e) => setScheduleDate(e.target.value)}
                                 className="flex-1 px-3 py-2 bg-input-background border border-border rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary"
@@ -1390,9 +1453,15 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
 
                   <div className="space-y-4">
                     <h4 className="text-sm font-bold border-b border-border pb-1">Property Location</h4>
-                    <div className="text-sm">
-                      <div className="text-muted-foreground">Lot / Block</div>
-                      <div className="font-medium">Lot {selectedRequest.propertyDetails?.lotNumber || 'TBA'}, Block {selectedRequest.propertyDetails?.blockNumber || 'TBA'}</div>
+                    <div className="flex gap-4">
+                       <div className="text-sm">
+                         <div className="text-muted-foreground">Lot Area</div>
+                         <div className="font-bold text-primary">{selectedRequest.propertyDetails?.lotArea || 0} sqm</div>
+                       </div>
+                       <div className="text-sm">
+                         <div className="text-muted-foreground">Lot / Block</div>
+                         <div className="font-medium">Lot {selectedRequest.propertyDetails?.lotNumber || 'TBA'}, Block {selectedRequest.propertyDetails?.blockNumber || 'TBA'}</div>
+                       </div>
                     </div>
                     <div className="text-sm">
                       <div className="text-muted-foreground">Address</div>
@@ -1401,19 +1470,44 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                   </div>
                 </div>
 
+                {/* --- NEW: AI PERSONNEL RECOMMENDATION PANEL --- */}
+                <div className="bg-primary/5 border border-primary/20 rounded-xl p-5">
+                   <div className="flex items-center gap-2 mb-3">
+                      <div className="p-1.5 bg-primary/20 rounded-lg">
+                         <Sparkles className="size-4 text-primary" />
+                      </div>
+                      <h4 className="text-sm font-bold text-foreground">AI Staffing Recommendation</h4>
+                   </div>
+                   <p className="text-xs text-muted-foreground mb-4">
+                      Automatically calculated requirements based on a lot area of <strong>{selectedRequest.propertyDetails?.lotArea || 0} sqm</strong> and project complexity for a <strong>{selectedRequest.surveyType}</strong>.
+                   </p>
+                   
+                   <div className="grid sm:grid-cols-2 gap-3">
+                      {recommendPersonnel(selectedRequest.propertyDetails?.lotArea || 0, selectedRequest.surveyType).map((staff, i) => (
+                         <div key={i} className="flex justify-between items-center bg-card border border-border rounded-lg p-3 shadow-sm">
+                            <span className="font-semibold text-xs sm:text-sm text-foreground">{staff.role}</span>
+                            <div className="text-right">
+                               <span className="text-xs font-bold bg-primary/10 text-primary px-2 py-0.5 rounded-full">{staff.req} Required</span>
+                               <div className="text-[10px] text-muted-foreground mt-1 truncate max-w-[120px]" title={staff.staff}>{staff.staff}</div>
+                            </div>
+                         </div>
+                      ))}
+                   </div>
+                </div>
+
                 <div className="pt-6 border-t border-border flex flex-col-reverse sm:flex-row sm:justify-between gap-4">
                    <div className="flex gap-2 w-full sm:w-auto">
                      <button 
                       onClick={() => handleDeleteRequest(selectedRequest.id)}
                       className="flex-1 sm:flex-none justify-center flex items-center gap-2 text-destructive hover:bg-destructive/10 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
                      >
-                        <Trash2 className="size-4" /> Delete
+                        <Trash2 className="size-4" /> Archive / Delete
                      </button>
                      <button 
                       onClick={() => handleCancelRequest(selectedRequest.id)}
                       className="flex-1 sm:flex-none justify-center flex items-center gap-2 text-red-500 hover:bg-red-500/10 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
                      >
-                        <XCircle className="size-4" /> Cancel
+                        <XCircle className="size-4" /> Cancel Request
                      </button>
                    </div>
                    <button onClick={() => setSelectedRequest(null)} className="w-full sm:w-auto px-6 py-2 bg-foreground text-background rounded-lg text-sm font-bold">
@@ -1425,7 +1519,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
           </div>
         )}
 
-        {/* --- RECEIPT MODAL (NEW) --- */}
+        {/* --- RECEIPT MODAL --- */}
         {selectedReceipt && (
           <div className="fixed inset-0 bg-background/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
             <div className="bg-card rounded-2xl border border-border max-w-lg w-full overflow-hidden shadow-2xl flex flex-col">

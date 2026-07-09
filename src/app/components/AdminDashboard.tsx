@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Map, LayoutDashboard, FileText, Calendar as CalendarIcon, Users, FileCheck, CreditCard, BarChart3, Settings, LogOut, Moon, Sun, Search, Filter, Download, ChevronLeft, ChevronRight, CheckCircle2, XCircle, X, Clock, AlertCircle, TrendingUp, Loader2, Trash2, Archive, ExternalLink, Bell, Edit, Menu, Upload, Sparkles } from 'lucide-react';
+import { Map, LayoutDashboard, FileText, Calendar as CalendarIcon, Users, FileCheck, CreditCard, BarChart3, Settings, LogOut, Moon, Sun, Search, Filter, Download, ChevronLeft, ChevronRight, CheckCircle2, XCircle, X, Clock, AlertCircle, TrendingUp, Loader2, Trash2, Archive, RotateCcw, ExternalLink, Bell, Edit, Menu, Upload, Sparkles } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line } from 'recharts';
 import { useAuth } from '../context/AuthContext';
 import { SURVEY_TYPES, BARANGAYS, mockPayments, mockRequests, mockUsers } from '../data/mockData';
@@ -78,6 +78,9 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
   const [documents, setDocuments] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [adminCalendarMonth, setAdminCalendarMonth] = useState(new Date());
+
+  // Archive Toggle State
+  const [showArchived, setShowArchived] = useState(false);
 
   // Notification State
   const [showNotifications, setShowNotifications] = useState(false);
@@ -168,6 +171,8 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
 
   // --- FILTER OUT ARCHIVED (SOFT DELETED) REQUESTS ---
   const activeRequests = requests.filter(r => !r.isArchived);
+  const archivedRequests = requests.filter(r => r.isArchived);
+  const displayRequests = showArchived ? archivedRequests : activeRequests;
 
   // --- HELPER FORMATTERS ---
   const formatCurrency = (amount: number | string | undefined) => `PHP ${Number(amount || 0).toLocaleString()}`;
@@ -330,18 +335,32 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
     }
   };
 
-  // --- NEW: SOFT DELETE (ARCHIVING) ---
+  // --- SOFT DELETE & RESTORE (ARCHIVING) ---
   const handleDeleteRequest = async (requestId: string) => {
     if (!window.confirm("Are you sure you want to archive this request? It will be safely retained in the database but removed from active queues.")) return;
     try {
       if (requestId.startsWith('local-')) {
-        updateLocalDoc('requests', requestId, { status: 'cancelled', isArchived: true });
+        updateLocalDoc('requests', requestId, { isArchived: true });
       } else {
-        await updateDoc(doc(db, 'requests', requestId), { status: 'cancelled', isArchived: true });
+        await updateDoc(doc(db, 'requests', requestId), { isArchived: true });
       }
       setSelectedRequest(null);
     } catch (error) {
       console.error("Error archiving request:", error);
+    }
+  };
+
+  const handleRestoreRequest = async (requestId: string) => {
+    if (!window.confirm("Are you sure you want to restore this request to the active queue?")) return;
+    try {
+      if (requestId.startsWith('local-')) {
+        updateLocalDoc('requests', requestId, { isArchived: false });
+      } else {
+        await updateDoc(doc(db, 'requests', requestId), { isArchived: false });
+      }
+      setSelectedRequest(null);
+    } catch (error) {
+      console.error("Error restoring request:", error);
     }
   };
 
@@ -555,7 +574,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
           />
         )}
 
-        {/* RESPONSIVE SIDEBAR: Fully visible on desktop, slides off-canvas on mobile */}
+        {/* RESPONSIVE SIDEBAR */}
         <aside className={`
           fixed inset-y-0 left-0 z-50 bg-sidebar border-r border-sidebar-border flex flex-col transition-transform duration-300 w-64
           md:relative md:translate-x-0
@@ -570,7 +589,6 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                 SurveySync
               </h1>
             </div>
-            {/* Close button only visible on mobile inside the sidebar */}
             <button 
               onClick={() => setIsMobileMenuOpen(false)} 
               className="p-2 rounded-lg hover:bg-sidebar-accent md:hidden text-sidebar-foreground"
@@ -616,7 +634,6 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
         <main className="flex-1 overflow-auto relative min-w-0">
           <header className="bg-card border-b border-border px-4 sm:px-8 py-4 sm:py-6 sticky top-0 z-30 flex justify-between items-center">
             <div className="flex items-center gap-3">
-              {/* Hamburger Menu - Only visible on mobile/minimized screens */}
               <button onClick={() => setIsMobileMenuOpen(true)} className="md:hidden p-2 -ml-2 rounded-lg hover:bg-accent text-foreground">
                 <Menu className="size-6" />
               </button>
@@ -638,7 +655,6 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                     )}
                   </button>
 
-                  {/* Dropdown Menu */}
                   {showNotifications && (
                     <div className="absolute right-0 mt-3 w-80 max-w-[90vw] bg-card border border-border rounded-xl shadow-2xl z-50 overflow-hidden">
                       <div className="p-3 border-b border-border bg-muted/30 font-semibold flex justify-between items-center">
@@ -746,37 +762,55 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
 
             {/* --- REQUESTS TAB --- */}
             {activeTab === 'requests' && (
-               <div className="bg-card rounded-xl border border-border overflow-hidden overflow-x-auto">
-                  <table className="w-full min-w-[600px]">
-                     <thead className="bg-muted/50 text-xs">
-                        <tr>
-                           <th className="px-6 py-4 text-left">Date</th>
-                           <th className="px-6 py-4 text-left">Ref</th>
-                           <th className="px-6 py-4 text-left">Client</th>
-                           <th className="px-6 py-4 text-left">Type</th>
-                           <th className="px-6 py-4 text-left">Status</th>
-                           <th className="px-6 py-4 text-left">Action</th>
-                        </tr>
-                     </thead>
-                     <tbody className="divide-y divide-border">
-                        {activeRequests.map(request => (
-                           <tr key={request.id} className="hover:bg-accent/30 transition-colors">
-                              <td className="px-6 py-4 text-sm">{formatDate(request.submittedAt)}</td>
-                              <td className="px-6 py-4 text-sm">{request.referenceNo}</td>
-                              <td className="px-6 py-4 text-sm">{getClientName(request.clientId, request.clientName)}</td>
-                              <td className="px-6 py-4 text-sm">{request.surveyType}</td>
-                              <td className="px-6 py-4">
-                                 <span className={`px-2 py-1 rounded text-xs border ${statusColor(request.status)}`}>{request.status.replace(/_/g, ' ')}</span>
+               <div className="space-y-4">
+                  <div className="flex justify-end">
+                    <button 
+                      onClick={() => setShowArchived(!showArchived)}
+                      className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors border ${showArchived ? 'bg-primary text-primary-foreground border-primary' : 'bg-card text-foreground border-border hover:bg-accent'}`}
+                    >
+                      <Archive className="size-4" />
+                      {showArchived ? 'Hide Archived Requests' : 'View Archived Requests'}
+                    </button>
+                  </div>
+                  <div className="bg-card rounded-xl border border-border overflow-hidden overflow-x-auto">
+                    <table className="w-full min-w-[600px]">
+                       <thead className="bg-muted/50 text-xs">
+                          <tr>
+                             <th className="px-6 py-4 text-left">Date</th>
+                             <th className="px-6 py-4 text-left">Ref</th>
+                             <th className="px-6 py-4 text-left">Client</th>
+                             <th className="px-6 py-4 text-left">Type</th>
+                             <th className="px-6 py-4 text-left">Status</th>
+                             <th className="px-6 py-4 text-left">Action</th>
+                          </tr>
+                       </thead>
+                       <tbody className="divide-y divide-border">
+                          {displayRequests.map(request => (
+                             <tr key={request.id} className="hover:bg-accent/30 transition-colors">
+                                <td className="px-6 py-4 text-sm">{formatDate(request.submittedAt)}</td>
+                                <td className="px-6 py-4 text-sm">{request.referenceNo}</td>
+                                <td className="px-6 py-4 text-sm">{getClientName(request.clientId, request.clientName)}</td>
+                                <td className="px-6 py-4 text-sm">{request.surveyType}</td>
+                                <td className="px-6 py-4">
+                                   <span className={`px-2 py-1 rounded text-xs border ${statusColor(request.status)}`}>{request.status.replace(/_/g, ' ')}</span>
+                                </td>
+                                <td className="px-6 py-4">
+                                  <button onClick={() => setSelectedRequest(request)} className="p-2 hover:bg-accent rounded-lg border border-border">
+                                    <ExternalLink className="size-4" />
+                                  </button>
+                                </td>
+                             </tr>
+                          ))}
+                          {displayRequests.length === 0 && (
+                            <tr>
+                              <td colSpan={6} className="px-6 py-10 text-center text-muted-foreground">
+                                {showArchived ? 'No archived requests found.' : 'No active requests found.'}
                               </td>
-                              <td className="px-6 py-4">
-                                <button onClick={() => setSelectedRequest(request)} className="p-2 hover:bg-accent rounded-lg border border-border">
-                                  <ExternalLink className="size-4" />
-                                </button>
-                              </td>
-                           </tr>
-                        ))}
-                     </tbody>
-                  </table>
+                            </tr>
+                          )}
+                       </tbody>
+                    </table>
+                  </div>
                </div>
             )}
 
@@ -1044,7 +1078,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                           <label className="block text-sm font-medium mb-1.5">Selected Date</label>
                           <input
                             type="date"
-                            min={minDateStr} // Enforces 3-day restriction on the native input
+                            min={minDateStr} 
                             value={availabilityDate}
                             onChange={(e) => setAvailabilityDate(e.target.value)}
                             className="w-full px-3 py-2 bg-input-background border border-border rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary"
@@ -1390,7 +1424,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                           <div className="flex flex-col sm:flex-row gap-4">
                              <input 
                                 type="date" 
-                                min={minDateStr} // Enforces 3-day buffer on manual edits
+                                min={minDateStr} 
                                 value={scheduleDate}
                                 onChange={(e) => setScheduleDate(e.target.value)}
                                 className="flex-1 px-3 py-2 bg-input-background border border-border rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary"
@@ -1497,15 +1531,24 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
 
                 <div className="pt-6 border-t border-border flex flex-col-reverse sm:flex-row sm:justify-between gap-4">
                    <div className="flex gap-2 w-full sm:w-auto">
-                     <button 
-                      onClick={() => handleDeleteRequest(selectedRequest.id)}
-                      className="flex-1 sm:flex-none justify-center flex items-center gap-2 text-destructive hover:bg-destructive/10 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-                     >
-                        <Archive className="size-4" /> Archive
-                     </button>
+                     {selectedRequest.isArchived ? (
+                        <button 
+                          onClick={() => handleRestoreRequest(selectedRequest.id)}
+                          className="flex-1 sm:flex-none justify-center flex items-center gap-2 text-emerald-600 border border-emerald-200 hover:bg-emerald-50 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+                        >
+                          <RotateCcw className="size-4" /> Restore Request
+                        </button>
+                     ) : (
+                        <button 
+                          onClick={() => handleDeleteRequest(selectedRequest.id)}
+                          className="flex-1 sm:flex-none justify-center flex items-center gap-2 text-slate-600 border border-slate-200 hover:bg-slate-100 dark:text-slate-300 dark:border-slate-700 dark:hover:bg-slate-800 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+                        >
+                          <Archive className="size-4" /> Archive
+                        </button>
+                     )}
                      <button 
                       onClick={() => handleCancelRequest(selectedRequest.id)}
-                      className="flex-1 sm:flex-none justify-center flex items-center gap-2 text-red-500 hover:bg-red-500/10 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+                      className="flex-1 sm:flex-none justify-center flex items-center gap-2 text-red-500 hover:bg-red-500/10 border border-transparent hover:border-red-500/20 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
                      >
                         <XCircle className="size-4" /> Cancel Request
                      </button>

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Map, LayoutDashboard, FileText, Calendar as CalendarIcon, Users, FileCheck, CreditCard, BarChart3, Settings, LogOut, Moon, Sun, Search, Filter, Download, ChevronLeft, ChevronRight, CheckCircle2, XCircle, X, Clock, AlertCircle, TrendingUp, Loader2, Trash2, ExternalLink, Bell, Edit, Menu, Upload, Sparkles } from 'lucide-react';
+import { Map, LayoutDashboard, FileText, Calendar as CalendarIcon, Users, FileCheck, CreditCard, BarChart3, Settings, LogOut, Moon, Sun, Search, Filter, Download, ChevronLeft, ChevronRight, CheckCircle2, XCircle, X, Clock, AlertCircle, TrendingUp, Loader2, Trash2, Archive, ExternalLink, Bell, Edit, Menu, Upload, Sparkles } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line } from 'recharts';
 import { useAuth } from '../context/AuthContext';
 import { SURVEY_TYPES, BARANGAYS, mockPayments, mockRequests, mockUsers } from '../data/mockData';
@@ -1470,7 +1470,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                   </div>
                 </div>
 
-                {/* --- NEW: AI PERSONNEL RECOMMENDATION PANEL --- */}
+                {/* --- AI PERSONNEL RECOMMENDATION PANEL --- */}
                 <div className="bg-primary/5 border border-primary/20 rounded-xl p-5">
                    <div className="flex items-center gap-2 mb-3">
                       <div className="p-1.5 bg-primary/20 rounded-lg">
@@ -1501,7 +1501,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                       onClick={() => handleDeleteRequest(selectedRequest.id)}
                       className="flex-1 sm:flex-none justify-center flex items-center gap-2 text-destructive hover:bg-destructive/10 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
                      >
-                        <Trash2 className="size-4" /> Archive / Delete
+                        <Archive className="size-4" /> Archive
                      </button>
                      <button 
                       onClick={() => handleCancelRequest(selectedRequest.id)}

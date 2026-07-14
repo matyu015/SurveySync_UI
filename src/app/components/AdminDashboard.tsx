@@ -746,6 +746,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                       <thead className="bg-muted/50 text-xs uppercase text-muted-foreground">
                         <tr>
                           <th className="px-6 py-4 text-left">Ref No</th>
+                          <th className="px-6 py-4 text-left">Date Submitted</th>
                           <th className="px-6 py-4 text-left">Client</th>
                           <th className="px-6 py-4 text-left">Type</th>
                           <th className="px-6 py-4 text-left">Status</th>
@@ -753,9 +754,20 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-border">
-                        {activeRequests.slice(0, 8).map(request => (
+                        {activeRequests.slice(0, 8).map(request => {
+                          const dateObj = new Date(request.submittedAt || request.createdAt || new Date());
+                          return (
                           <tr key={request.id} className="hover:bg-accent/30 transition-colors">
                             <td className="px-6 py-4 text-sm font-medium">{request.referenceNo}</td>
+                            <td className="px-6 py-4">
+                               <div className="text-sm font-medium text-foreground">
+                                 {dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                               </div>
+                               <div className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1">
+                                 <Clock className="size-3" />
+                                 {dateObj.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}
+                               </div>
+                            </td>
                             <td className="px-6 py-4 text-sm">{getClientName(request.clientId, request.clientName)}</td>
                             <td className="px-6 py-4 text-sm">{request.surveyType}</td>
                             <td className="px-6 py-4">
@@ -771,7 +783,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                               </button>
                             </td>
                           </tr>
-                        ))}
+                        )})}
                       </tbody>
                     </table>
                   </div>
@@ -794,9 +806,19 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                         </tr>
                      </thead>
                      <tbody className="divide-y divide-border">
-                        {activeRequests.map(request => (
+                        {activeRequests.map(request => {
+                           const dateObj = new Date(request.submittedAt || request.createdAt || new Date());
+                           return (
                            <tr key={request.id} className="hover:bg-accent/30 transition-colors">
-                              <td className="px-6 py-4 text-sm">{formatDate(request.submittedAt)}</td>
+                              <td className="px-6 py-4">
+                                 <div className="text-sm font-medium text-foreground">
+                                   {dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                                 </div>
+                                 <div className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1">
+                                   <Clock className="size-3" />
+                                   {dateObj.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}
+                                 </div>
+                              </td>
                               <td className="px-6 py-4 text-sm">{request.referenceNo}</td>
                               <td className="px-6 py-4 text-sm">{getClientName(request.clientId, request.clientName)}</td>
                               <td className="px-6 py-4 text-sm">{request.surveyType}</td>
@@ -809,7 +831,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                                 </button>
                               </td>
                            </tr>
-                        ))}
+                        )})}
                         {activeRequests.length === 0 && (
                           <tr>
                             <td colSpan={6} className="px-6 py-10 text-center text-muted-foreground">
@@ -847,9 +869,19 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                          </tr>
                       </thead>
                       <tbody className="divide-y divide-border">
-                         {archivedRequests.map(request => (
+                         {archivedRequests.map(request => {
+                            const dateObj = new Date(request.updatedAt || request.submittedAt || request.createdAt || new Date());
+                            return (
                             <tr key={request.id} className="hover:bg-accent/30 transition-colors opacity-80 hover:opacity-100">
-                               <td className="px-6 py-4 text-sm">{formatDate(request.updatedAt || request.submittedAt)}</td>
+                               <td className="px-6 py-4">
+                                 <div className="text-sm font-medium text-foreground">
+                                   {dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                                 </div>
+                                 <div className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1">
+                                   <Clock className="size-3" />
+                                   {dateObj.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}
+                                 </div>
+                               </td>
                                <td className="px-6 py-4 text-sm font-medium text-foreground">{request.referenceNo}</td>
                                <td className="px-6 py-4 text-sm">{getClientName(request.clientId, request.clientName)}</td>
                                <td className="px-6 py-4 text-sm">{request.surveyType}</td>
@@ -862,7 +894,7 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                                  </button>
                                </td>
                             </tr>
-                         ))}
+                         )})}
                          {archivedRequests.length === 0 && (
                            <tr>
                              <td colSpan={6} className="px-6 py-16 text-center text-muted-foreground flex flex-col items-center">
@@ -938,21 +970,26 @@ export default function AdminDashboard({ onLogout, darkMode, toggleDarkMode }: A
                                   </tr>
                                 </thead>
                                 <tbody className="divide-y divide-border">
-                                  {clientRequests.map(req => (
+                                  {clientRequests.map(req => {
+                                    const dateObj = new Date(req.submittedAt || req.createdAt || new Date());
+                                    return (
                                     <tr key={req.id} className={`transition-colors ${req.isArchived ? 'bg-red-500/5' : 'hover:bg-accent/30'}`}>
                                       <td className="px-5 py-3 font-medium text-foreground">
                                         {req.referenceNo} 
                                         {req.isArchived && <span className="ml-2 text-[10px] bg-red-500 text-white px-2 py-0.5 rounded-full">Archived</span>}
                                       </td>
                                       <td className="px-5 py-3">{req.surveyType}</td>
-                                      <td className="px-5 py-3 text-muted-foreground">{formatDate(req.submittedAt || req.createdAt)}</td>
+                                      <td className="px-5 py-3">
+                                         <div className="text-foreground">{dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</div>
+                                         <div className="text-[10px] text-muted-foreground flex items-center gap-1 mt-0.5"><Clock className="size-3" />{dateObj.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}</div>
+                                      </td>
                                       <td className="px-5 py-3">
                                         <span className={`px-2.5 py-1 rounded-full text-[10px] sm:text-xs font-medium border whitespace-nowrap ${statusColor(req.status)}`}>
                                           {req.status.replace(/_/g, ' ')}
                                         </span>
                                       </td>
                                     </tr>
-                                  ))}
+                                  )})}
                                 </tbody>
                               </table>
                             </div>

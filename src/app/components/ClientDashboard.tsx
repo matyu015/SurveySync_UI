@@ -440,54 +440,28 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
 
     setIsPaying(true);
 
-    // 1. Process PayMongo API if GCash is selected
+// 1. Process PayMongo API if GCash is selected
     if (paymentMethod === 'gcash') {
       try {
-        // PayMongo requires amounts in centavos (e.g. 500 PHP = 50000)
         const amountInCentavos = Math.round(numericAmount * 100);
         
-        const secretKey = import.meta.env.VITE_PAYMONGO_SECRET_KEY;
-        
-        if (!secretKey) {
-          alert("PayMongo Secret Key is missing! Please configure VITE_PAYMONGO_SECRET_KEY in your .env file.");
-          setIsPaying(false);
-          return;
-        }
-
-        const response = await fetch('https://api.paymongo.com/v2/checkout_sessions', {
+        // Call OUR SECURE VERCEL BACKEND instead of PayMongo directly
+        const response = await fetch('/api/checkout', {
           method: 'POST',
           headers: {
-            accept: 'application/json',
-            'Content-Type': 'application/json',
-            authorization: 'Basic ' + btoa(secretKey + ':')
+            'Content-Type': 'application/json'
           },
           body: JSON.stringify({
-            data: {
-              attributes: {
-                send_email_receipt: true,
-                show_description: true,
-                show_line_items: true,
-                line_items: [
-                  {
-                    currency: 'PHP',
-                    amount: amountInCentavos,
-                    name: selectedPaymentRequest.surveyType || 'Survey Payment',
-                    quantity: 1
-                  }
-                ],
-                payment_method_types: ['gcash'],
-                reference_number: selectedPaymentRequest.referenceNo || selectedPaymentRequest.id,
-                success_url: window.location.href, // Redirects back to dashboard
-                cancel_url: window.location.href,
-              }
-            }
+            amount: amountInCentavos,
+            surveyType: selectedPaymentRequest.surveyType || 'Survey Payment',
+            referenceNo: selectedPaymentRequest.referenceNo || selectedPaymentRequest.id
           })
         });
 
         const paymongoData = await response.json();
 
         if (paymongoData?.data?.attributes?.checkout_url) {
-          // Pre-save the pending transaction to Firestore mapped to the PayMongo Session ID
+          // Pre-save the pending transaction to Firestore
           await addDoc(collection(db, 'payments'), {
             requestId: selectedPaymentRequest.id,
             requestRef: selectedPaymentRequest.referenceNo || selectedPaymentRequest.id,
@@ -507,15 +481,15 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
           window.location.href = paymongoData.data.attributes.checkout_url;
         } else {
           console.error("PayMongo Error Details:", paymongoData);
-          alert("Failed to initialize PayMongo checkout. Check your console and API Key.");
+          alert("Failed to initialize PayMongo checkout. Check your console.");
           setIsPaying(false);
         }
       } catch (error) {
         console.error("Payment routing error:", error);
-        alert("An error occurred connecting to the PayMongo gateway.");
+        alert("An error occurred connecting to the secure payment gateway.");
         setIsPaying(false);
       }
-      return; // Force stop execution to prevent manual processing
+      return; 
     }
 
     // 2. Process Manual/OTC/Bank payments if GCash was not selected

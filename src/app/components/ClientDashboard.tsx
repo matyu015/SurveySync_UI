@@ -29,6 +29,16 @@ const PAYMENT_METHODS: Array<{ value: PaymentMethod; label: string; detail: stri
   { value: 'cash', label: 'Cash', detail: 'Pay at the office' },
 ];
 
+const DINALUPIHAN_BARANGAYS = [
+  "Aquino", "Bangal", "Bayan-bayanan", "Bonifacio", "Burgos", "Colo", "Daang Bago",
+  "Dalao", "Del Pilar", "Gen. Luna", "Gomez", "Happy Valley", "Jose C. Payumo, Jr.",
+  "Kataasan", "Layac", "Luacan", "Mabini Ext.", "Mabini Proper", "Magsaysay", "Maligaya",
+  "Naparing", "New San Jose", "Old San Jose", "Padre Dandan", "Pag-asa", "Pagalanggang",
+  "Payumo", "Pentor", "Pinulot", "Pita", "Rizal", "Roosevelt", "Roxas", "Saguing",
+  "San Benito", "San Isidro", "San Pablo", "San Ramon", "San Simon", "Santo Niño",
+  "Sapang Balas", "Tubo-tubo", "Tucop", "Zamora"
+];
+
 function makeReference(prefix: string) {
   const timestamp = new Date();
   const date = timestamp.toISOString().slice(0, 10).replace(/-/g, '');
@@ -1274,15 +1284,20 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
               </div>
 
               <div>
-                <label className="block text-sm font-medium mb-1.5">Property Location (Bataan)</label>
-                <input
-                  type="text"
+                <label className="block text-sm font-medium mb-1.5">Property Location (Dinalupihan, Bataan)</label>
+                <select
                   required
-                  placeholder="e.g., Brgy. San Ramon, Dinalupihan"
                   value={location}
                   onChange={(e) => setLocation(e.target.value)}
-                  className="w-full px-4 py-3 bg-input-background border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/50 placeholder:text-muted-foreground transition-shadow"
-                />
+                  className="w-full px-4 py-3 bg-input-background border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/50 transition-shadow"
+                >
+                  <option value="" disabled>-- Select Barangay --</option>
+                  {DINALUPIHAN_BARANGAYS.map((brgy) => (
+                    <option key={brgy} value={`Brgy. ${brgy}, Dinalupihan, Bataan`}>
+                      Brgy. {brgy}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               <div>
@@ -1408,14 +1423,20 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
               </div>
 
               <div>
-                <label className="block text-sm font-medium mb-1.5">Property Location (Bataan)</label>
-                <input
-                  type="text"
+                <label className="block text-sm font-medium mb-1.5">Property Location (Dinalupihan, Bataan)</label>
+                <select
                   required
                   value={location}
                   onChange={(e) => setLocation(e.target.value)}
-                  className="w-full px-4 py-3 bg-input-background border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/50 placeholder:text-muted-foreground transition-shadow"
-                />
+                  className="w-full px-4 py-3 bg-input-background border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/50 transition-shadow"
+                >
+                  <option value="" disabled>-- Select Barangay --</option>
+                  {DINALUPIHAN_BARANGAYS.map((brgy) => (
+                    <option key={brgy} value={`Brgy. ${brgy}, Dinalupihan, Bataan`}>
+                      Brgy. {brgy}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               <div>

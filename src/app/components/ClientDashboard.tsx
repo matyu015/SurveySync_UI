@@ -76,8 +76,8 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
   
   // Request Modal State
   const [isRequestModalOpen, setIsRequestModalOpen] = useState(false);
-  const [isEditModalOpen, setIsEditModalOpen] = useState(false); // NEW: Edit Modal
-  const [editingRequestId, setEditingRequestId] = useState<string | null>(null); // NEW: Tracking which request to edit
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [editingRequestId, setEditingRequestId] = useState<string | null>(null);
   
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [surveyType, setSurveyType] = useState('Lot Plan / Relocation');
@@ -299,7 +299,7 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
     }
   };
 
-  // --- NEW: Client Edit Request Logic ---
+  // Client Edit Request Logic
   const openEditModal = (request: any) => {
     setEditingRequestId(request.id);
     setSurveyType(request.surveyType || 'Lot Plan / Relocation');
@@ -307,7 +307,7 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
     setPurpose(request.propertyDetails?.purpose || '');
     setLotArea(String(request.propertyDetails?.lotArea || ''));
     setNotes(request.notes || '');
-    setSelectedFile(null); // Clear any previous file selection
+    setSelectedFile(null);
     setIsEditModalOpen(true);
   };
 
@@ -357,7 +357,7 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
             uploadedAt: new Date().toISOString(),
             fileType: selectedFile.type,
             fileSize: `${(selectedFile.size / (1024 * 1024)).toFixed(2)} MB`,
-            isReplacement: true // Flags this as a replaced document update
+            isReplacement: true
           });
         }
       }
@@ -374,7 +374,7 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
     }
   };
 
-  // --- Client Soft-Delete / Cancel Request Logic ---
+  // Client Soft-Delete / Cancel Request Logic
   const handleCancelRequest = async (requestId: string) => {
     if (!window.confirm("Are you sure you want to cancel this survey request?")) return;
     try {
@@ -431,18 +431,100 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
     }
   };
 
-  // Submit Payment + Supabase Image Upload + GCash Data
+  // --- REAL PAYMONGO GCASH INTEGRATION ---
   const handleSubmitPayment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser || !selectedPaymentRequest) return;
     const numericAmount = Number(paymentAmount);
     if (!Number.isFinite(numericAmount) || numericAmount <= 0) return alert("Enter a valid payment amount.");
 
-    if (paymentReceiptFile && paymentReceiptFile.size > 5 * 1024 * 1024) {
-      return alert("The receipt image is too large. Maximum size is 5MB.");
+    setIsPaying(true);
+
+    // 1. Process PayMongo API if GCash is selected
+    if (paymentMethod === 'gcash') {
+      try {
+        // PayMongo requires amounts in centavos (e.g. 500 PHP = 50000)
+        const amountInCentavos = Math.round(numericAmount * 100);
+        
+        const secretKey = import.meta.env.VITE_PAYMONGO_SECRET_KEY;
+        
+        if (!secretKey) {
+          alert("PayMongo Secret Key is missing! Please configure VITE_PAYMONGO_SECRET_KEY in your .env file.");
+          setIsPaying(false);
+          return;
+        }
+
+        const response = await fetch('https://api.paymongo.com/v2/checkout_sessions', {
+          method: 'POST',
+          headers: {
+            accept: 'application/json',
+            'Content-Type': 'application/json',
+            authorization: 'Basic ' + btoa(secretKey + ':')
+          },
+          body: JSON.stringify({
+            data: {
+              attributes: {
+                send_email_receipt: true,
+                show_description: true,
+                show_line_items: true,
+                line_items: [
+                  {
+                    currency: 'PHP',
+                    amount: amountInCentavos,
+                    name: selectedPaymentRequest.surveyType || 'Survey Payment',
+                    quantity: 1
+                  }
+                ],
+                payment_method_types: ['gcash'],
+                reference_number: selectedPaymentRequest.referenceNo || selectedPaymentRequest.id,
+                success_url: window.location.href, // Redirects back to dashboard
+                cancel_url: window.location.href,
+              }
+            }
+          })
+        });
+
+        const paymongoData = await response.json();
+
+        if (paymongoData?.data?.attributes?.checkout_url) {
+          // Pre-save the pending transaction to Firestore mapped to the PayMongo Session ID
+          await addDoc(collection(db, 'payments'), {
+            requestId: selectedPaymentRequest.id,
+            requestRef: selectedPaymentRequest.referenceNo || selectedPaymentRequest.id,
+            clientId: currentUser.uid,
+            clientEmail: currentUser.email,
+            clientName: selectedPaymentRequest.clientName || currentUser.email,
+            amount: numericAmount,
+            method: 'gcash',
+            status: 'pending',
+            referenceNo: paymongoData.data.id, // Save the PayMongo session ID for tracking
+            createdAt: new Date().toISOString(),
+          });
+          
+          await updateDoc(doc(db, 'requests', selectedPaymentRequest.id), { paymentStatus: 'partial' });
+          
+          // Execute the redirect to the official PayMongo GCash checkout page
+          window.location.href = paymongoData.data.attributes.checkout_url;
+        } else {
+          console.error("PayMongo Error Details:", paymongoData);
+          alert("Failed to initialize PayMongo checkout. Check your console and API Key.");
+          setIsPaying(false);
+        }
+      } catch (error) {
+        console.error("Payment routing error:", error);
+        alert("An error occurred connecting to the PayMongo gateway.");
+        setIsPaying(false);
+      }
+      return; // Force stop execution to prevent manual processing
     }
 
-    setIsPaying(true);
+    // 2. Process Manual/OTC/Bank payments if GCash was not selected
+    if (paymentReceiptFile && paymentReceiptFile.size > 5 * 1024 * 1024) {
+      alert("The receipt image is too large. Maximum size is 5MB.");
+      setIsPaying(false);
+      return;
+    }
+
     try {
       let receiptUrl = '';
 
@@ -456,8 +538,6 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
         receiptUrl = publicUrlData.publicUrl;
       }
 
-      const gcashAccountNum = (document.getElementById('gcash-phone') as HTMLInputElement)?.value || '';
-
       await addDoc(collection(db, 'payments'), {
         requestId: selectedPaymentRequest.id,
         requestRef: selectedPaymentRequest.referenceNo || selectedPaymentRequest.id,
@@ -469,7 +549,6 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
         status: 'pending',
         referenceNo: paymentReference || makeReference(paymentMethod.toUpperCase()),
         receiptUrl: receiptUrl || null,
-        gcashNumber: paymentMethod === 'gcash' ? gcashAccountNum : null,
         createdAt: new Date().toISOString(),
       });
       
@@ -478,10 +557,10 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
       setSelectedPaymentRequest(null);
       setPaymentReceiptFile(null);
       setActiveTab('payments');
-      if (paymentMethod === 'gcash') alert("GCash simulated transaction processed successfully and forwarded for verification!");
+      alert("Transaction processed successfully and forwarded for verification!");
     } catch (error) {
       console.error("Payment submission failed:", error);
-      alert("Failed to submit payment.");
+      alert("Failed to submit manual payment.");
     } finally {
       setIsPaying(false);
     }
@@ -1545,79 +1624,63 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
                     required
                   />
                 </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1.5">Transaction Reference</label>
-                  <input
-                    type="text"
-                    value={paymentReference}
-                    onChange={(e) => setPaymentReference(e.target.value)}
-                    placeholder="GCash, bank, or receipt no."
-                    className="w-full px-4 py-3 bg-input-background border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/50 placeholder:text-muted-foreground"
-                  />
-                </div>
+                {paymentMethod !== 'gcash' && (
+                  <div>
+                    <label className="block text-sm font-medium mb-1.5">Transaction Reference</label>
+                    <input
+                      type="text"
+                      value={paymentReference}
+                      onChange={(e) => setPaymentReference(e.target.value)}
+                      placeholder="Bank, or receipt no."
+                      className="w-full px-4 py-3 bg-input-background border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/50 placeholder:text-muted-foreground"
+                    />
+                  </div>
+                )}
               </div>
 
-              {/* INTERACTIVE GCASH GATEWAY SIMULATOR */}
+              {/* INTERACTIVE GCASH GATEWAY (PAYMONGO) */}
               {paymentMethod === 'gcash' && (
-                <div className="border border-blue-200 bg-blue-50/50 dark:bg-blue-950/20 rounded-xl p-4 sm:p-5 space-y-4">
-                  <div className="flex items-center justify-between border-b border-blue-100 pb-2">
-                    <span className="text-xs font-bold uppercase tracking-wider text-blue-600">Secure GCash Portal</span>
-                    <span className="text-xs font-medium text-muted-foreground">Sandbox Environment</span>
+                <div className="border border-green-200 bg-green-50/50 dark:bg-green-950/20 rounded-xl p-4 sm:p-5 space-y-4">
+                  <div className="flex items-center justify-between border-b border-green-100 pb-2">
+                    <span className="text-xs font-bold uppercase tracking-wider text-green-600">PayMongo Secure Checkout</span>
+                    <span className="text-xs font-medium text-muted-foreground">Official Integration</span>
                   </div>
 
-                  <div className="space-y-3">
-                    <div>
-                      <label className="block text-xs font-semibold mb-1 text-slate-700 dark:text-slate-300">GCash Mobile Number</label>
-                      <div className="relative">
-                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-medium text-slate-400">+63</span>
-                        <input
-                          type="tel"
-                          id="gcash-phone"
-                          maxLength={10}
-                          placeholder="9171234567"
-                          className="w-full pl-12 pr-4 py-2.5 bg-background border border-blue-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm font-medium"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="p-3 bg-blue-100/50 dark:bg-blue-950/40 rounded-lg text-xs text-blue-800 dark:text-blue-300 space-y-1">
-                      <p className="font-semibold">💡 Presentation Flow Tips:</p>
-                      <ul className="list-disc pl-4 space-y-0.5">
-                        <li>Enter your target account mobile signature.</li>
-                        <li>The system automatically generates a dynamic secure fallback token.</li>
-                        <li>Attach the optional screenshot graphic below to fulfill defense tracking.</li>
-                      </ul>
-                    </div>
+                  <div className="p-3 bg-green-100/50 dark:bg-green-950/40 rounded-lg text-sm text-green-800 dark:text-green-300">
+                    <p className="font-semibold flex items-center gap-2 mb-1">✅ Ready to pay via GCash!</p>
+                    <p className="text-xs">Clicking the button below will securely redirect you to the official PayMongo GCash checkout portal. No manual receipts required.</p>
                   </div>
                 </div>
               )}
 
               {/* UPLOAD RECEIPT SECTION */}
-              <div className="border-t border-border pt-4">
-                <label className="block text-sm font-medium mb-1.5">Upload Receipt (Optional but recommended)</label>
-                <div className={`border-2 border-dashed rounded-xl p-4 text-center transition-colors ${paymentReceiptFile ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50 bg-input-background'}`}>
-                  <input
-                    type="file"
-                    id="receipt-file"
-                    onChange={(e) => setPaymentReceiptFile(e.target.files?.[0] || null)}
-                    className="hidden"
-                    accept=".jpg,.jpeg,.png"
-                  />
-                  {paymentReceiptFile ? (
-                    <div className="flex flex-col items-center gap-2">
-                      <FileCheck className="size-6 text-primary" />
-                      <span className="text-sm font-medium text-foreground truncate max-w-full px-4">{paymentReceiptFile.name}</span>
-                      <label htmlFor="receipt-file" className="text-xs text-primary hover:underline cursor-pointer">Replace image</label>
-                    </div>
-                  ) : (
-                    <label htmlFor="receipt-file" className="flex flex-col items-center cursor-pointer gap-2">
-                      <Upload className="size-6 text-muted-foreground" />
-                      <span className="text-sm font-medium">Click to attach screenshot</span>
-                      <span className="text-xs text-muted-foreground">JPG or PNG (Max 5MB)</span>
-                    </label>
-                  )}
+              {paymentMethod !== 'gcash' && (
+                <div className="border-t border-border pt-4">
+                  <label className="block text-sm font-medium mb-1.5">Upload Receipt (Optional but recommended)</label>
+                  <div className={`border-2 border-dashed rounded-xl p-4 text-center transition-colors ${paymentReceiptFile ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50 bg-input-background'}`}>
+                    <input
+                      type="file"
+                      id="receipt-file"
+                      onChange={(e) => setPaymentReceiptFile(e.target.files?.[0] || null)}
+                      className="hidden"
+                      accept=".jpg,.jpeg,.png"
+                    />
+                    {paymentReceiptFile ? (
+                      <div className="flex flex-col items-center gap-2">
+                        <FileCheck className="size-6 text-primary" />
+                        <span className="text-sm font-medium text-foreground truncate max-w-full px-4">{paymentReceiptFile.name}</span>
+                        <label htmlFor="receipt-file" className="text-xs text-primary hover:underline cursor-pointer">Replace image</label>
+                      </div>
+                    ) : (
+                      <label htmlFor="receipt-file" className="flex flex-col items-center cursor-pointer gap-2">
+                        <Upload className="size-6 text-muted-foreground" />
+                        <span className="text-sm font-medium">Click to attach screenshot</span>
+                        <span className="text-xs text-muted-foreground">JPG or PNG (Max 5MB)</span>
+                      </label>
+                    )}
+                  </div>
                 </div>
-              </div>
+              )}
 
               <div className="rounded-xl bg-muted/50 border border-border p-4 text-xs sm:text-sm text-muted-foreground">
                 This creates a pending transaction for admin verification. Once admin marks it paid, your survey payment status updates.
@@ -1639,8 +1702,10 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
                   {isPaying ? (
                     <>
                       <Loader2 className="size-5 animate-spin" />
-                      Sending...
+                      Processing...
                     </>
+                  ) : paymentMethod === 'gcash' ? (
+                    'Proceed to GCash Checkout'
                   ) : (
                     'Send for Verification'
                   )}

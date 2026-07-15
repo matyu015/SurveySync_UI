@@ -1609,15 +1609,47 @@ export default function ClientDashboard({ onLogout, darkMode, toggleDarkMode }: 
 
               <div className="grid sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium mb-1.5">Amount</label>
+                  <label className="flex items-center justify-between text-sm font-medium mb-1.5">
+                    Amount
+                    {selectedPaymentRequest && (
+                      <span className="text-xs font-normal text-muted-foreground">
+                        Total Fee: {formatCurrency(selectedPaymentRequest.amount)}
+                      </span>
+                    )}
+                  </label>
                   <input
                     type="number"
                     min="1"
+                    max={selectedPaymentRequest?.amount}
                     value={paymentAmount}
                     onChange={(e) => setPaymentAmount(e.target.value)}
                     className="w-full px-4 py-3 bg-input-background border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/50"
                     required
                   />
+                  {/* DYNAMIC PAYMENT NOTICE */}
+                  {selectedPaymentRequest && paymentAmount && Number(paymentAmount) > 0 && (
+                    <div className="mt-2 text-xs font-medium">
+                      {Number(paymentAmount) === Number(selectedPaymentRequest.amount) ? (
+                        <span className="text-emerald-600 bg-emerald-500/10 px-2 py-1.5 rounded-md flex items-center gap-1 w-fit">
+                          <CheckCircle2 className="size-3" /> Fully Paid
+                        </span>
+                      ) : Number(paymentAmount) > Number(selectedPaymentRequest.amount) ? (
+                        <span className="text-red-600 bg-red-500/10 px-2 py-1.5 rounded-md flex items-center gap-1 w-fit">
+                          ⚠️ Exceeds total amount
+                        </span>
+                      ) : (
+                        <div className="flex flex-col gap-1.5 mt-1">
+                           <span className="text-blue-600 bg-blue-500/10 px-2 py-1.5 rounded-md flex items-center gap-1 w-fit">
+                             <CreditCard className="size-3" /> 
+                             {Number(paymentAmount) === Number(selectedPaymentRequest.amount) / 2 ? '50% Downpayment' : 'Partial Payment'}
+                           </span>
+                           <span className="text-muted-foreground px-1">
+                             Balance after payment: <span className="font-bold">{formatCurrency(Number(selectedPaymentRequest.amount) - Number(paymentAmount))}</span>
+                           </span>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
                 {paymentMethod !== 'gcash' && (
                   <div>
